@@ -5,3 +5,5 @@ dist/
 *.db-shm
 .DS_Store
 *.tgz
+# Stale local npm layout copy; publish from repository root only
+package/
