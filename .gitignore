@@ -7,3 +7,6 @@ dist/
 *.tgz
 # Stale local npm layout copy; publish from repository root only
 package/
+
+# Local Cursor project skill (keep on machine only)
+.cursor/skills/agt0/
