@@ -1,0 +1,63 @@
+{
+  "name": "agt0",
+  "version": "0.1.0",
+  "description": "One file. All your agent needs. Local-first storage for AI agents — database, filesystem, and memory in a single SQLite file.",
+  "type": "module",
+  "bin": {
+    "agt0": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/cli.js",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "sqlite",
+    "filesystem",
+    "agent",
+    "ai",
+    "cli",
+    "mcp",
+    "memory",
+    "local-first"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seekcontext/agt0.git"
+  },
+  "homepage": "https://github.com/seekcontext/agt0#readme",
+  "bugs": {
+    "url": "https://github.com/seekcontext/agt0/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist",
+    "skill.md",
+    "README.md"
+  ],
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "csv-parse": "^6.2.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.5.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}
