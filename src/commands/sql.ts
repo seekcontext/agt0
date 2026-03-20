@@ -143,6 +143,11 @@ function printFsSqlHelp(): void {
       '  AGT0_FS_MAX_FILES  AGT0_FS_MAX_FILE_BYTES  AGT0_FS_MAX_TOTAL_BYTES',
     ),
   );
+  console.log(
+    chalk.dim(
+      '  AGT0_FS_MAX_ROWS  AGT0_FS_PARSE_CHUNK_BYTES  AGT0_FS_PREVIEW_BYTES',
+    ),
+  );
 }
 
 function handleDotCommand(

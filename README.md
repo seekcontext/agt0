@@ -224,7 +224,7 @@ agt0
 | `fs_tsv(path [, options])` | _line_number, _path, _data | Read TSV |
 | `fs_jsonl(path [, options])` | _line_number, line, _path | Read JSONL files |
 
-Path patterns support `*`, `?`, and `**` globs. Optional `options` is a JSON string with keys: `exclude`, `strict`, `delimiter`, `header`. Safety limits via `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`.
+Path patterns support `*`, `?`, and `**` globs. Optional `options` is a JSON string with keys: `exclude`, `strict`, `delimiter`, `header`. Safety limits via `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`, `AGT0_FS_MAX_ROWS` (cap rows per TVF scan), `AGT0_FS_PARSE_CHUNK_BYTES` (CSV/TSV incremental parse chunk size), and `AGT0_FS_PREVIEW_BYTES` (per-file header preview when a glob matches multiple CSV/TSV files). Table-valued functions stream-parse delimited files so peak memory stays closer to one on-disk copy plus parser state, not a full parsed row array.
 
 ## Data Storage
 

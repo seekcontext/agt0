@@ -171,9 +171,39 @@ function envInt(name: string, fallback: number): number {
 export function readFsLimits(): FsReadLimits {
   return {
     maxFiles: envInt('AGT0_FS_MAX_FILES', 10_000),
-    maxFileBytes: envInt('AGT0_FS_MAX_FILE_BYTES', 10 * 1024 * 1024),
+    /** Default raised now that fs_* TVFs stream-parse (lower peak RAM than full row arrays). */
+    maxFileBytes: envInt('AGT0_FS_MAX_FILE_BYTES', 64 * 1024 * 1024),
     maxTotalBytes: envInt('AGT0_FS_MAX_TOTAL_BYTES', 100 * 1024 * 1024),
   };
+}
+
+function envIntPositive(name: string, fallback: number): number {
+  const v = process.env[name];
+  if (v === undefined || v === '') return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+/** Chunk size when feeding CSV/TSV through the incremental parser (bytes). */
+export function readFsParseChunkBytes(): number {
+  return envIntPositive('AGT0_FS_PARSE_CHUNK_BYTES', 2 * 1024 * 1024);
+}
+
+/** Bytes read per file to discover column keys when a glob matches multiple CSV/TSV files. */
+export function readFsPreviewBytes(): number {
+  return envIntPositive('AGT0_FS_PREVIEW_BYTES', 256 * 1024);
+}
+
+/**
+ * Max rows emitted per fs_csv / fs_tsv / fs_text / fs_jsonl scan (one SQL table reference).
+ * `null` = unlimited. Stops runaway scans (e.g. accidental full read in a tight loop).
+ */
+export function readFsMaxRows(): number | null {
+  const v = process.env.AGT0_FS_MAX_ROWS;
+  if (v === undefined || v === '' || v === '0') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return Math.floor(n);
 }
 
 export function pathMatchesAny(path: string, regexes: RegExp[]): boolean {

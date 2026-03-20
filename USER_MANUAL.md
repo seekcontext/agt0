@@ -695,9 +695,12 @@ agt0 sql analytics -q "
 | Variable | Description | Default |
 |---|---|---|
 | `AGT0_HOME` | Override storage directory | `~/.agt0` |
-| `AGT0_FS_MAX_FILES` | Max files matched by glob | unlimited |
-| `AGT0_FS_MAX_FILE_BYTES` | Max bytes per file in table functions | unlimited |
-| `AGT0_FS_MAX_TOTAL_BYTES` | Max total bytes across all matched files | unlimited |
+| `AGT0_FS_MAX_FILES` | Max files matched by glob | `10000` |
+| `AGT0_FS_MAX_FILE_BYTES` | Max bytes per file in table functions | `64MiB` |
+| `AGT0_FS_MAX_TOTAL_BYTES` | Max total bytes across all matched files | `100MiB` |
+| `AGT0_FS_MAX_ROWS` | Max rows emitted per `fs_csv` / `fs_tsv` / `fs_text` / `fs_jsonl` scan (`0` = off) | off |
+| `AGT0_FS_PARSE_CHUNK_BYTES` | Chunk size when incrementally parsing CSV/TSV (bytes) | `2MiB` |
+| `AGT0_FS_PREVIEW_BYTES` | Bytes read per file to discover CSV/TSV columns when a glob matches multiple files | `256KiB` |
 
 ---
 

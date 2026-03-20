@@ -1,3 +1,8 @@
+---
+name: agt0
+description: Local-first agent storage — SQLite database, virtual filesystem, and memory in one .db file. Use when persisting agent state, querying CSV/JSONL/logs with SQL, or using fs_read/fs_write and fs_csv/fs_text table functions via the agt0 CLI or Node API.
+---
+
 # agt0 — Agent Storage Skill
 
 > **One file. All your agent needs.**
@@ -123,7 +128,7 @@ WHERE json_extract(_data, '$.email') IS NOT NULL;
 
 **Options** (JSON string, 2nd arg): `exclude` (comma-separated globs), `strict` (bool — fail on bad rows), `delimiter` (string), `header` (bool).
 
-**Limits** (env vars): `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`, `AGT0_FS_MAX_ROWS` (optional cap per TVF scan), `AGT0_FS_PARSE_CHUNK_BYTES`, `AGT0_FS_PREVIEW_BYTES` (multi-file CSV/TSV column discovery).
+**Limits** (env vars): `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`, `AGT0_FS_MAX_ROWS`, `AGT0_FS_PARSE_CHUNK_BYTES`, `AGT0_FS_PREVIEW_BYTES`.
 
 ---
 

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { Database as DatabaseType } from 'better-sqlite3';
 import { parse as csvParse } from 'csv-parse/sync';
@@ -10,9 +13,54 @@ import {
   parseFsTableOptions,
   pathMatchesAny,
   readFsLimits,
+  readFsMaxRows,
+  readFsParseChunkBytes,
+  readFsPreviewBytes,
   sqlLikeLiteralPrefix,
   type FsTableOptions,
 } from './fs-path.js';
+
+type CsvTransformFn = (opts: Record<string, unknown>) => {
+  parse: (
+    nextBuf: Buffer | undefined,
+    end: boolean,
+    push: (record: unknown) => void,
+    close: () => void,
+  ) => Error | undefined;
+};
+
+let cachedCsvTransform: CsvTransformFn | null = null;
+
+/** csv-parse does not export `transform` in package exports; load via package root (sync). */
+function getCsvTransform(): CsvTransformFn {
+  if (cachedCsvTransform) return cachedCsvTransform;
+  const require = createRequire(import.meta.url);
+  const resolved = require.resolve('csv-parse/sync');
+  let dir = dirname(resolved);
+  for (let i = 0; i < 10; i++) {
+    try {
+      const pkgPath = join(dir, 'package.json');
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
+        name?: string;
+      };
+      if (pkg.name === 'csv-parse') {
+        const apiPath = join(dir, 'lib', 'api', 'index.js');
+        cachedCsvTransform = require(apiPath).transform as CsvTransformFn;
+        return cachedCsvTransform;
+      }
+    } catch {
+      /* keep walking */
+    }
+    const next = dirname(dir);
+    if (next === dir) break;
+    dir = next;
+  }
+  throw new Error('agt0: failed to load csv-parse incremental parser');
+}
+
+type DelimitedOpts = FsTableOptions & { delimiter: string };
+
+type FileMeta = { path: string; size: number };
 
 /**
  * Register table-valued functions (fs_list, fs_text, fs_csv, fs_tsv, fs_jsonl).
@@ -73,40 +121,35 @@ export function registerTableFunctions(db: DatabaseType): void {
     mtime: string;
   };
 
-  function readFileUtf8(path: string): string | null {
+  function readFileBuffer(path: string): Buffer | null {
     const row = stmtReadFile.get(path, 'file') as
       | { content: Buffer | null }
       | undefined;
     if (!row || row.content === null) return null;
-    return row.content.toString('utf-8');
+    return row.content;
   }
 
-  function resolveFilesWithContent(
+  function resolveMatchedFileMetas(
     pathPattern: string,
     opts: FsTableOptions,
-  ): { path: string; text: string }[] {
+  ): FileMeta[] {
     const limits = readFsLimits();
     const patternRaw = normalizeGlobPattern(pathPattern);
     const hasGlob = isGlobPattern(patternRaw);
 
-    let metas: { path: string; size: number }[] = [];
+    let metas: FileMeta[] = [];
 
     if (!hasGlob) {
       const literal = normalizeVirtualPath(patternRaw);
-      const row = stmtFileMeta.get(literal) as
-        | { path: string; size: number }
-        | undefined;
+      const row = stmtFileMeta.get(literal) as FileMeta | undefined;
       metas = row ? [row] : [];
     } else {
       const matcher = globToRegExp(patternRaw);
       const prefix = sqlLikeLiteralPrefix(patternRaw);
       const rows =
         prefix !== null
-          ? (stmtFilesByLike.all(escapeLikePrefix(prefix) + '%') as {
-              path: string;
-              size: number;
-            }[])
-          : (stmtAllFilesMeta.all() as { path: string; size: number }[]);
+          ? (stmtFilesByLike.all(escapeLikePrefix(prefix) + '%') as FileMeta[])
+          : (stmtAllFilesMeta.all() as FileMeta[]);
 
       metas = rows.filter((r) =>
         matcher.test(normalizeVirtualPath(r.path)),
@@ -136,91 +179,247 @@ export function registerTableFunctions(db: DatabaseType): void {
       }
     }
 
-    const out: { path: string; text: string }[] = [];
-    for (const m of metas) {
-      const text = readFileUtf8(m.path);
-      if (text === null) continue;
-      out.push({ path: m.path, text });
-    }
-    return out;
+    return metas;
   }
 
-  function parseDelimited(
-    text: string,
-    opts: FsTableOptions,
-  ): Record<string, string>[] {
+  function assertUnderRowLimit(emitted: { n: number }, max: number | null) {
+    if (max === null) return;
+    if (emitted.n > max) {
+      throw new Error(
+        `agt0 fs: row limit exceeded AGT0_FS_MAX_ROWS (${max}); narrow the query or raise the limit`,
+      );
+    }
+  }
+
+  /** UTF-8 lines; supports \n and \r\n (no trailing segment after final \n). */
+  function* iterateUtf8Lines(buf: Buffer): Generator<string> {
+    let lineStart = 0;
+    for (let i = 0; i < buf.length; i++) {
+      if (buf[i] === 0x0a) {
+        let end = i;
+        if (end > lineStart && buf[end - 1] === 0x0d) {
+          end -= 1;
+        }
+        yield buf.subarray(lineStart, end).toString('utf8');
+        lineStart = i + 1;
+      }
+    }
+    if (lineStart < buf.length) {
+      yield buf.subarray(lineStart).toString('utf8');
+    }
+  }
+
+  /**
+   * Same segments as `buf.toString('utf8').split('\n')` for valid UTF-8 (incl. trailing empty when the file ends with \n).
+   */
+  function* iterateUtf8LinesLikeSplit(buf: Buffer): Generator<string> {
+    if (buf.length === 0) return;
+    let lineStart = 0;
+    for (let i = 0; i <= buf.length; i++) {
+      if (i < buf.length && buf[i] !== 0x0a) continue;
+      let end = i;
+      if (end > lineStart && buf[end - 1] === 0x0d) {
+        end -= 1;
+      }
+      yield buf.subarray(lineStart, end).toString('utf8');
+      lineStart = i + 1;
+    }
+  }
+
+  /** fs_text: match prior split('\\n') + skip final empty line. */
+  function* yieldFsTextRows(path: string, buf: Buffer): Generator<{
+    _line_number: number;
+    line: string;
+    _path: string;
+  }> {
+    if (buf.length === 0) return;
+    let lineNo = 0;
+    let prev: string | undefined;
+    for (const line of iterateUtf8LinesLikeSplit(buf)) {
+      if (prev !== undefined) {
+        lineNo += 1;
+        yield { _line_number: lineNo, line: prev, _path: path };
+      }
+      prev = line;
+    }
+    if (prev !== undefined) {
+      const trailingEmpty = prev === '' && buf[buf.length - 1] === 0x0a;
+      if (!trailingEmpty) {
+        lineNo += 1;
+        yield { _line_number: lineNo, line: prev, _path: path };
+      }
+    }
+  }
+
+  function addKeysFromDelimitedRecord(
+    record: Record<string, string> | string[],
+    opts: DelimitedOpts,
+    keySet: Set<string>,
+  ) {
+    if (!opts.header) {
+      const row = record as string[];
+      for (let j = 0; j < row.length; j++) {
+        keySet.add(`column_${j + 1}`);
+      }
+    } else {
+      for (const k of Object.keys(record as Record<string, string>)) {
+        keySet.add(k);
+      }
+    }
+  }
+
+  function jsonFromDelimitedRecord(
+    record: Record<string, string> | string[],
+    opts: DelimitedOpts,
+    keyOrder: string[],
+  ): string {
+    const row: Record<string, string | null> = {};
+    if (!opts.header) {
+      const arr = record as string[];
+      for (const k of keyOrder) {
+        const idx = Number(k.slice(8)) - 1;
+        row[k] = arr[idx] ?? null;
+      }
+    } else {
+      const obj = record as Record<string, string>;
+      for (const k of keyOrder) {
+        row[k] = obj[k] ?? null;
+      }
+    }
+    return JSON.stringify(row);
+  }
+
+  function keysFromDelimitedPreview(
+    preview: Buffer,
+    opts: DelimitedOpts,
+  ): string[] {
+    const common = {
+      skip_empty_lines: true,
+      trim: true,
+      delimiter: opts.delimiter,
+      relax_column_count: true,
+    };
     try {
       if (!opts.header) {
-        const rows = csvParse(text, {
+        const rows = csvParse(preview, {
+          ...common,
           columns: false,
-          skip_empty_lines: true,
-          trim: true,
-          delimiter: opts.delimiter,
+          to: 1,
         }) as string[][];
-        return rows.map((row) => {
-          const o: Record<string, string> = {};
-          for (let j = 0; j < row.length; j++) {
-            o[`column_${j + 1}`] = row[j] ?? '';
-          }
-          return o;
-        });
+        if (!rows[0]) return [];
+        return rows[0].map((_, j) => `column_${j + 1}`);
       }
-      return csvParse(text, {
+      const rows = csvParse(preview, {
+        ...common,
         columns: true,
-        skip_empty_lines: true,
-        trim: true,
-        delimiter: opts.delimiter,
+        to: 1,
       }) as Record<string, string>[];
-    } catch (e) {
-      if (opts.strict) {
-        throw new Error(
-          `agt0 fs: delimited parse error (${opts.delimiter === '\t' ? 'tsv' : 'csv'}): ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
-      const lines = text.split('\n').filter((l) => l.trim());
-      return lines.map((line) => ({ _raw: line }));
+      if (!rows[0]) return [];
+      return Object.keys(rows[0]).sort();
+    } catch {
+      return [];
     }
   }
 
-  function unionKeysFromRecords(
-    byFile: { path: string; records: Record<string, string>[] }[],
+  function unionKeysFromFilePreviews(
+    metas: FileMeta[],
+    opts: DelimitedOpts,
+    previewBytes: number,
   ): string[] {
     const keys = new Set<string>();
-    for (const f of byFile) {
-      for (const r of f.records) {
-        for (const k of Object.keys(r)) {
-          keys.add(k);
-        }
-      }
+    for (const m of metas) {
+      const buf = readFileBuffer(m.path);
+      if (!buf) continue;
+      const slice = buf.subarray(0, Math.min(buf.length, previewBytes));
+      const ks = keysFromDelimitedPreview(slice, opts);
+      for (const k of ks) keys.add(k);
     }
     return [...keys].sort();
   }
 
-  function* yieldDelimitedRows(
-    files: { path: string; text: string }[],
-    opts: FsTableOptions,
-  ): Generator<{
-    _line_number: number;
-    _path: string;
-    _data: string;
-  }> {
-    const parsed = files.map((f) => ({
-      path: f.path,
-      records: parseDelimited(f.text, opts),
-    }));
-    const keyOrder = unionKeysFromRecords(parsed);
-    for (const { path, records } of parsed) {
-      for (let i = 0; i < records.length; i++) {
-        const row: Record<string, string | null> = {};
-        for (const k of keyOrder) {
-          row[k] = records[i][k] ?? null;
-        }
-        yield {
-          _line_number: i + 1,
-          _path: path,
-          _data: JSON.stringify(row),
-        };
+  function parseDelimitedBufferChunked(
+    buffer: Buffer,
+    opts: DelimitedOpts,
+    chunkSize: number,
+    onRecord: (record: Record<string, string> | string[]) => void,
+  ): void {
+    const parser = getCsvTransform()({
+      columns: opts.header,
+      skip_empty_lines: true,
+      trim: true,
+      delimiter: opts.delimiter,
+    });
+    const push = (record: unknown) => {
+      onRecord(record as Record<string, string> | string[]);
+    };
+    const close = () => {};
+    for (let off = 0; off < buffer.length; off += chunkSize) {
+      const end = Math.min(off + chunkSize, buffer.length);
+      const err = parser.parse(buffer.subarray(off, end), false, push, close);
+      if (err !== undefined) {
+        throw err;
       }
+    }
+    const err = parser.parse(undefined, true, push, close);
+    if (err !== undefined) {
+      throw err;
+    }
+  }
+
+  /**
+   * Parse one file's delimited content. Does not retain all rows in memory at once during
+   * CSV parsing (chunked incremental parse); output array is built row-by-row (still O(rows)
+   * for the returned objects, which SQLite consumes incrementally from the generator).
+   */
+  function collectDelimitedRowsForFile(
+    path: string,
+    buffer: Buffer,
+    opts: DelimitedOpts,
+    initialKeys: string[] | null,
+    chunkSize: number,
+    emitted: { n: number },
+    maxRows: number | null,
+  ): { _line_number: number; _path: string; _data: string }[] {
+    const startEmitted = emitted.n;
+    const out: { _line_number: number; _path: string; _data: string }[] = [];
+    const keySet = new Set<string>(initialKeys ?? []);
+    let keyOrder: string[] = initialKeys ? [...initialKeys].sort() : [];
+
+    try {
+      parseDelimitedBufferChunked(buffer, opts, chunkSize, (record) => {
+        if (initialKeys === null) {
+          addKeysFromDelimitedRecord(record, opts, keySet);
+          keyOrder = [...keySet].sort();
+        }
+        emitted.n += 1;
+        assertUnderRowLimit(emitted, maxRows);
+        out.push({
+          _line_number: out.length + 1,
+          _path: path,
+          _data: jsonFromDelimitedRecord(record, opts, keyOrder),
+        });
+      });
+      return out;
+    } catch (e) {
+      if (opts.strict) {
+        throw e instanceof Error
+          ? e
+          : new Error(`agt0 fs: delimited parse error: ${String(e)}`);
+      }
+      emitted.n = startEmitted;
+      let i = 0;
+      for (const line of iterateUtf8Lines(buffer)) {
+        if (!line.trim()) continue;
+        i += 1;
+        emitted.n += 1;
+        assertUnderRowLimit(emitted, maxRows);
+        out.push({
+          _line_number: i,
+          _path: path,
+          _data: JSON.stringify({ _raw: line }),
+        });
+      }
+      return out;
     }
   }
 
@@ -260,12 +459,16 @@ export function registerTableFunctions(db: DatabaseType): void {
     *rows(...params: unknown[]) {
       const pathPattern = String(params[0]);
       const opts = parseFsTableOptions(params[1]);
-      const files = resolveFilesWithContent(pathPattern, opts);
-      for (const file of files) {
-        const lines = file.text.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i] === '' && i === lines.length - 1) continue;
-          yield { _line_number: i + 1, line: lines[i], _path: file.path };
+      const metas = resolveMatchedFileMetas(pathPattern, opts);
+      const maxRows = readFsMaxRows();
+      const emitted = { n: 0 };
+      for (const m of metas) {
+        const buf = readFileBuffer(m.path);
+        if (!buf) continue;
+        for (const row of yieldFsTextRows(m.path, buf)) {
+          emitted.n += 1;
+          assertUnderRowLimit(emitted, maxRows);
+          yield row;
         }
       }
     },
@@ -278,8 +481,35 @@ export function registerTableFunctions(db: DatabaseType): void {
       const pathPattern = String(params[0]);
       const opts = parseFsTableOptions(params[1]);
       const merged = { ...opts, delimiter: opts.delimiter || ',' };
-      const files = resolveFilesWithContent(pathPattern, merged);
-      yield* yieldDelimitedRows(files, merged);
+      const metas = resolveMatchedFileMetas(pathPattern, merged);
+      const chunkSize = readFsParseChunkBytes();
+      const previewBytes = readFsPreviewBytes();
+      const maxRows = readFsMaxRows();
+      const emitted = { n: 0 };
+      let initialKeys: string[] | null =
+        metas.length > 1
+          ? unionKeysFromFilePreviews(metas, merged, previewBytes)
+          : null;
+      if (initialKeys !== null && initialKeys.length === 0) {
+        initialKeys = null;
+      }
+
+      for (const m of metas) {
+        const buf = readFileBuffer(m.path);
+        if (!buf) continue;
+        const rows = collectDelimitedRowsForFile(
+          m.path,
+          buf,
+          merged,
+          initialKeys,
+          chunkSize,
+          emitted,
+          maxRows,
+        );
+        for (const r of rows) {
+          yield r;
+        }
+      }
     },
   });
 
@@ -290,8 +520,35 @@ export function registerTableFunctions(db: DatabaseType): void {
       const pathPattern = String(params[0]);
       const base = parseFsTableOptions(params[1]);
       const opts = { ...base, delimiter: '\t' };
-      const files = resolveFilesWithContent(pathPattern, opts);
-      yield* yieldDelimitedRows(files, opts);
+      const metas = resolveMatchedFileMetas(pathPattern, opts);
+      const chunkSize = readFsParseChunkBytes();
+      const previewBytes = readFsPreviewBytes();
+      const maxRows = readFsMaxRows();
+      const emitted = { n: 0 };
+      let initialKeys: string[] | null =
+        metas.length > 1
+          ? unionKeysFromFilePreviews(metas, opts, previewBytes)
+          : null;
+      if (initialKeys !== null && initialKeys.length === 0) {
+        initialKeys = null;
+      }
+
+      for (const m of metas) {
+        const buf = readFileBuffer(m.path);
+        if (!buf) continue;
+        const rows = collectDelimitedRowsForFile(
+          m.path,
+          buf,
+          opts,
+          initialKeys,
+          chunkSize,
+          emitted,
+          maxRows,
+        );
+        for (const r of rows) {
+          yield r;
+        }
+      }
     },
   });
 
@@ -301,27 +558,35 @@ export function registerTableFunctions(db: DatabaseType): void {
     *rows(...params: unknown[]) {
       const pathPattern = String(params[0]);
       const opts = parseFsTableOptions(params[1]);
-      const files = resolveFilesWithContent(pathPattern, opts);
-      for (const file of files) {
-        const lines = file.text.split('\n').filter((l) => l.trim());
-        for (let i = 0; i < lines.length; i++) {
+      const metas = resolveMatchedFileMetas(pathPattern, opts);
+      const maxRows = readFsMaxRows();
+      const emitted = { n: 0 };
+      for (const m of metas) {
+        const buf = readFileBuffer(m.path);
+        if (!buf) continue;
+        let i = 0;
+        for (const line of iterateUtf8Lines(buf)) {
+          if (!line.trim()) continue;
+          i += 1;
+          emitted.n += 1;
+          assertUnderRowLimit(emitted, maxRows);
           try {
-            JSON.parse(lines[i]);
+            JSON.parse(line);
             yield {
-              _line_number: i + 1,
-              line: lines[i],
-              _path: file.path,
+              _line_number: i,
+              line,
+              _path: m.path,
             };
           } catch (e) {
             if (opts.strict) {
               throw new Error(
-                `agt0 fs: invalid JSONL at ${file.path}:${i + 1}: ${e instanceof Error ? e.message : String(e)}`,
+                `agt0 fs: invalid JSONL at ${m.path}:${i}: ${e instanceof Error ? e.message : String(e)}`,
               );
             }
             yield {
-              _line_number: i + 1,
-              line: JSON.stringify(lines[i]),
-              _path: file.path,
+              _line_number: i,
+              line: JSON.stringify(line),
+              _path: m.path,
             };
           }
         }

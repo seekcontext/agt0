@@ -90,6 +90,29 @@ describe('fs TVF and scalars', () => {
     }
   });
 
+  it('throws when row count exceeds AGT0_FS_MAX_ROWS', async () => {
+    const prev = process.env.AGT0_FS_MAX_ROWS;
+    process.env.AGT0_FS_MAX_ROWS = '2';
+    const { createDatabase, openDatabase, deleteDatabase } = await import(
+      '../src/core/database.js'
+    );
+    const { fsWrite } = await import('../src/core/virtual-fs.js');
+    const name = uniqName();
+    createDatabase(name);
+    const db = openDatabase(name);
+    try {
+      fsWrite(db, '/r/rows.csv', Buffer.from('a\n1\n2\n3\n'));
+      expect(() => {
+        db.prepare(`SELECT 1 FROM fs_csv('/r/rows.csv')`).all();
+      }).toThrow(/AGT0_FS_MAX_ROWS/);
+    } finally {
+      db.close();
+      deleteDatabase(name);
+      if (prev === undefined) delete process.env.AGT0_FS_MAX_ROWS;
+      else process.env.AGT0_FS_MAX_ROWS = prev;
+    }
+  });
+
   it('throws when file count exceeds AGT0_FS_MAX_FILES', async () => {
     const prev = process.env.AGT0_FS_MAX_FILES;
     process.env.AGT0_FS_MAX_FILES = '1';
