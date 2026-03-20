@@ -1,161 +1,190 @@
-# agt0
+# agt0 — Agent Storage Skill
 
-Local-first storage for AI agents. Database, filesystem, and memory in a single SQLite file. Zero config, zero network, zero cost.
+> **One file. All your agent needs.**
+> Local-first database + filesystem + memory in a single SQLite file.
 
-## Install
+You are using **agt0** to persist data. Follow this reference precisely.
+
+---
+
+## Setup
 
 ```bash
 npm install -g @seekcontext/agt0
+agt0 init <dbname>
+agt0 use <dbname>          # set as default (omit db name in later commands)
 ```
 
-Verify:
+After `agt0 use`, you can omit `<db>` from all commands below.
+
+---
+
+## Essential Patterns
+
+### Store and retrieve data (SQL)
 
 ```bash
-agt0 --version
+# Inline SQL
+agt0 sql -q "CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT, status TEXT)"
+agt0 sql -q "INSERT INTO tasks (title, status) VALUES ('Build API', 'doing')"
+agt0 sql -q "SELECT * FROM tasks WHERE status = 'doing'"
+
+# Execute SQL file
+agt0 sql -f schema.sql
 ```
 
-## Quick Start
+### Store and retrieve files (CLI)
 
 ```bash
-# Create a database (one file = everything)
-agt0 init myapp
-
-# Set as default so you can omit the name
-agt0 use myapp
+agt0 fs put ./data.csv myapp:/data/data.csv        # upload file
+agt0 fs put -r ./src myapp:/src                     # upload directory
+agt0 fs cat myapp:/data/data.csv                    # read file
+agt0 fs ls myapp:/data/                             # list directory
+agt0 fs get myapp:/data/data.csv ./local.csv        # download file
+agt0 fs rm myapp:/data/old.csv                      # delete file
+agt0 fs mkdir myapp:/data/exports                   # create directory
 ```
 
-## SQL Execution
-
-```bash
-# Inline
-agt0 sql myapp -q "SELECT 1 + 1 AS result"
-
-# From file (must exist on disk)
-agt0 sql myapp -f schema.sql
-
-# Interactive REPL (when no -q or -f)
-agt0 sql myapp
-```
-
-## Virtual Filesystem
-
-Every database has a built-in filesystem. Files are stored inside SQLite.
-
-### CLI Operations
-
-```bash
-agt0 fs put ./data.csv myapp:/data/data.csv      # Upload file
-agt0 fs put -r ./docs myapp:/docs                 # Upload directory
-agt0 fs ls myapp:/data/                           # List files
-agt0 fs cat myapp:/data/data.csv                  # Read file
-agt0 fs get myapp:/data/data.csv ./local.csv      # Download file
-agt0 fs rm myapp:/data/old.csv                    # Delete file
-agt0 fs mkdir myapp:/data/exports                 # Create directory
-```
-
-### SQL Functions (Scalar)
+### Store and retrieve files (SQL)
 
 ```sql
-SELECT fs_read('/config.json');                             -- Read file
-SELECT fs_write('/data/hello.txt', 'Hello!');               -- Write file (returns bytes)
-SELECT fs_append('/logs/app.log', 'New entry\n');           -- Append
-SELECT fs_exists('/config.json');                           -- Check: 1 or 0
-SELECT fs_size('/config.json');                             -- Size in bytes
-SELECT fs_mtime('/config.json');                            -- Last modified ISO 8601
-SELECT fs_remove('/tmp/scratch.txt');                       -- Delete file
-SELECT fs_mkdir('/data/exports', 1);                        -- Create dir (1=recursive)
-SELECT fs_truncate('/logs/app.log', 0);                     -- Truncate to size (bytes)
-SELECT fs_read_at('/data/blob.bin', 0, 16);                   -- Read 16 bytes from offset (UTF-8 text)
-SELECT fs_write_at('/data/blob.bin', 100, 'patch');          -- Write at byte offset (pads with zeros)
+SELECT fs_write('/memory/context.md', 'User prefers dark mode');
+SELECT fs_read('/memory/context.md');
+SELECT fs_append('/logs/session.log', 'Step completed' || char(10));
+SELECT fs_exists('/config.json');                  -- 1 or 0
+SELECT fs_size('/config.json');                    -- bytes
 ```
 
-### SQL Functions (Table-Valued)
-
-Optional second argument on `fs_text`, `fs_csv`, `fs_tsv`, `fs_jsonl`: a JSON string with `exclude` (comma-separated globs), `strict` (bool), `delimiter` (string), `header` (bool). Relative exclude globs are rooted as `**/pattern`.
+### Query files as tables (zero-import)
 
 ```sql
--- List directory
-SELECT path, type, size, mode, mtime FROM fs_list('/data/');
-
--- Read text file by lines (globs: *, ?, **)
-SELECT _line_number, line, _path FROM fs_text('/logs/app.log');
-SELECT _line_number, line, _path FROM fs_text('/logs/**/*.log', '{"exclude":"*.tmp,*.bak"}');
-
--- Read CSV (_data is JSON per row; multi-file globs use union of column names)
-SELECT _line_number, _data, _path FROM fs_csv('/data/users.csv');
-
--- TSV (tab-separated)
-SELECT _line_number, _data, _path FROM fs_tsv('/data/report.tsv');
-
--- Read JSONL (each line is JSON)
-SELECT _line_number, line, _path FROM fs_jsonl('/logs/events.jsonl');
-```
-
-**Glob rules:** `*` = one path segment (no slash); `**` = any depth; `?` = one character (not slash). Example: `/data/**/*.csv`.
-
-**Limits (override via env):** `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`.
-
-### Key Pattern: File → SQL Query
-
-```sql
--- Query CSV like a table
-SELECT json_extract(_data, '$.name') AS name
+-- CSV → queryable rows (each row is JSON in _data column)
+SELECT json_extract(_data, '$.name') AS name,
+       json_extract(_data, '$.email') AS email
 FROM fs_csv('/data/users.csv')
 WHERE json_extract(_data, '$.role') = 'admin';
 
--- Import CSV into a table with deduplication
+-- JSONL structured logs
+SELECT json_extract(line, '$.level') AS level, COUNT(*)
+FROM fs_jsonl('/logs/app.jsonl')
+GROUP BY level;
+
+-- Grep across text files
+SELECT _path, _line_number, line
+FROM fs_text('/src/**/*.ts')
+WHERE line LIKE '%TODO%';
+
+-- Directory listing
+SELECT path, type, size, mtime FROM fs_list('/data/');
+```
+
+### Import file data into tables
+
+```sql
 INSERT INTO users (name, email)
 SELECT DISTINCT
   json_extract(_data, '$.name'),
   json_extract(_data, '$.email')
-FROM fs_csv('/data/import/users.csv')
+FROM fs_csv('/data/users.csv')
 WHERE json_extract(_data, '$.email') IS NOT NULL;
-
--- Grep-like search across files
-SELECT _path, _line_number, line
-FROM fs_text('/logs/*.log')
-WHERE line LIKE '%ERROR%';
 ```
+
+---
+
+## Complete SQL Function Reference
+
+### Scalar Functions
+
+| Function | Returns | Description |
+|---|---|---|
+| `fs_read(path)` | TEXT | Read file content as text |
+| `fs_write(path, content)` | INTEGER | Write/overwrite file, returns bytes |
+| `fs_append(path, data)` | INTEGER | Append to file, returns total bytes |
+| `fs_exists(path)` | INTEGER | 1 if path exists, 0 otherwise |
+| `fs_size(path)` | INTEGER | File size in bytes |
+| `fs_mtime(path)` | TEXT | Last modified time (ISO 8601) |
+| `fs_remove(path [, recursive])` | INTEGER | Delete file/dir, returns deleted count |
+| `fs_mkdir(path [, recursive])` | INTEGER | Create directory (1=recursive) |
+| `fs_truncate(path, size)` | INTEGER | Truncate to byte size |
+| `fs_read_at(path, offset, length)` | TEXT | Read byte range as UTF-8 |
+| `fs_write_at(path, offset, data)` | INTEGER | Write at byte offset (pads with NUL) |
+
+### Table-Valued Functions
+
+| Function | Columns | Description |
+|---|---|---|
+| `fs_list(dir)` | path, type, size, mode, mtime | List directory entries |
+| `fs_text(path [, opts])` | _line_number, line, _path | Read text by line |
+| `fs_csv(path [, opts])` | _line_number, _data, _path | Read CSV (row → JSON) |
+| `fs_tsv(path [, opts])` | _line_number, _data, _path | Read TSV (row → JSON) |
+| `fs_jsonl(path [, opts])` | _line_number, line, _path | Read JSONL by line |
+
+**Path globs:** `*` = one segment, `**` = any depth, `?` = one char. Example: `/logs/**/*.log`.
+
+**Options** (JSON string, 2nd arg): `exclude` (comma-separated globs), `strict` (bool — fail on bad rows), `delimiter` (string), `header` (bool).
+
+**Limits** (env vars): `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`.
+
+---
 
 ## Database Management
 
 ```bash
-agt0 list                                    # List all databases
-agt0 use myapp                               # Set default database
-agt0 inspect myapp                           # Overview: tables, files, size
-agt0 inspect myapp tables                    # Table list with row counts
-agt0 inspect myapp schema                    # Show CREATE statements
-agt0 dump myapp -o backup.sql                # Full SQL export
-agt0 dump myapp --ddl-only                   # Schema only
-agt0 seed myapp seed.sql                     # Run SQL file
-agt0 delete myapp --yes                      # Delete database
-agt0 branch create myapp --name staging      # Branch (copy) database
+agt0 list                                # list all databases
+agt0 inspect <db>                        # overview (tables, files, size)
+agt0 inspect <db> tables                 # table list with row counts
+agt0 inspect <db> schema                 # show CREATE statements
+agt0 dump <db> -o backup.sql             # full SQL export
+agt0 dump <db> --ddl-only                # schema only
+agt0 seed <db> schema.sql                # run SQL file
+agt0 delete <db> --yes                   # delete database
+agt0 branch create <db> --name staging   # branch (copy) database
+agt0 branch list <db>                    # list branches
+agt0 branch delete <db> --name staging   # delete branch
 ```
 
-## Interactive File Shell
+---
+
+## Interactive Shells
+
+### SQL REPL
 
 ```bash
-agt0 fs sh myapp
+agt0 sql <db>
 ```
 
-Commands: `ls`, `cd`, `cat`, `echo <text> > <path>`, `mkdir`, `rm`, `pwd`, `exit`.
+Type SQL ending with `;` to execute. Dot commands: `.help`, `.tables`, `.schema`, `.fshelp`, `.quit`.
+
+### Filesystem Shell
+
+```bash
+agt0 fs sh <db>
+```
+
+Commands: `ls`, `cd`, `cat`, `echo <text> > <path>`, `mkdir`, `rm`, `pwd`, `exit`, `help`.
+
+---
 
 ## Storage Layout
 
 ```
 ~/.agt0/
-├── config.json              # Default database setting
+├── config.json              # default database setting
 └── databases/
-    ├── myapp.db             # Single file = db + fs + memory
-    └── myapp-staging.db     # Branch
+    ├── myapp.db             # single file = tables + files + memory
+    └── myapp-staging.db     # branch
 ```
 
-## Important Notes
+Override with `AGT0_HOME` env var.
 
-- All data is local. No network required.
-- Each database is a single `.db` file. Copy it to back up.
-- The `_fs` table is the system table for the virtual filesystem. Do not drop it.
-- Glob patterns (`*`, `?`, `**`) work in `fs_text`, `fs_csv`, `fs_tsv`, `fs_jsonl` path parameters.
-- **SQL** REPL (`agt0 sql <db>` interactive): `.fshelp` lists `fs_*` functions and options. Not available in `agt0 fs sh` (use `help` there).
-- `fs_read_at` / `fs_write_at` use **byte** offsets; `fs_read_at` returns a UTF-8 string for that byte range (binary files may not round-trip through TEXT).
-- CSV columns are returned as a JSON string in the `_data` column. Use `json_extract(_data, '$.column_name')` to access individual fields.
+---
+
+## Critical Rules
+
+- All data is **local**. No network calls, no API keys.
+- Each database is a **single `.db` file**. Copy it to back up or share.
+- The `_fs` table is internal. **Never drop it.**
+- CSV rows are returned as JSON in the `_data` column. Access fields via `json_extract(_data, '$.column_name')`.
+- `fs_read_at` / `fs_write_at` operate on **byte** offsets.
+- The SQL REPL (`.fshelp`) and the filesystem shell (`help`) are **different** interfaces with different commands.
+- Glob `*` matches one path segment (no `/`). Use `**` to match across directories.

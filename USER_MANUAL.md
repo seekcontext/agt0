@@ -1,125 +1,244 @@
 # agt0 User Manual
 
+> One file. All your agent needs.
+
+Complete reference for agt0 — local-first storage for AI agents with database, filesystem, and memory in a single SQLite file.
+
+---
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Getting Started](#getting-started)
+- [SQL Execution](#sql-execution)
+- [Virtual Filesystem (CLI)](#virtual-filesystem-cli)
+- [Interactive Shells](#interactive-shells)
+- [SQL + FS Fusion](#sql--fs-fusion)
+- [Database Management](#database-management)
+- [Programmatic API (Node.js)](#programmatic-api-nodejs)
+- [Recipes](#recipes)
+- [Environment Variables](#environment-variables)
+- [Troubleshooting](#troubleshooting)
+
+---
+
 ## Installation
 
 ```bash
 npm install -g @seekcontext/agt0
 ```
 
-Requires Node.js 20 or later. Verify:
+Requires **Node.js 20** or later. Verify the installation:
 
 ```bash
 agt0 --version
 ```
 
+---
+
 ## Getting Started
 
-### 1. Create Your First Database
+### 1. Create a database
 
 ```bash
 agt0 init myapp
 ```
 
-This creates `~/.agt0/databases/myapp.db` — a single SQLite file that stores your tables and files. The first database you create is automatically set as the default.
+This creates `~/.agt0/databases/myapp.db` — a single SQLite file that holds tables, files, and agent memory. The first database you create is automatically set as the default.
 
-### 2. Run SQL
+### 2. Set the default database
 
 ```bash
-# Inline query
+agt0 use myapp
+```
+
+With a default set, you can omit the database name from most commands:
+
+```bash
+# These are equivalent when myapp is the default:
+agt0 sql myapp -q "SELECT 1"
+agt0 sql -q "SELECT 1"
+
+# Clear the default
+agt0 use --clear
+
+# Show current default
+agt0 use
+```
+
+### 3. Your first SQL query
+
+```bash
 agt0 sql myapp -q "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)"
 agt0 sql myapp -q "INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')"
 agt0 sql myapp -q "SELECT * FROM users"
+```
 
-# From a file (create schema.sql first, or use your migration file)
+### 4. Your first file operation
+
+```bash
+# Upload a file into the virtual filesystem
+agt0 fs put ./readme.txt myapp:/docs/readme.txt
+
+# Read it back
+agt0 fs cat myapp:/docs/readme.txt
+
+# Query it with SQL
+agt0 sql myapp -q "SELECT fs_read('/docs/readme.txt')"
+```
+
+---
+
+## SQL Execution
+
+### Inline query
+
+```bash
+agt0 sql myapp -q "SELECT * FROM users WHERE name = 'Alice'"
+```
+
+### Execute a SQL file
+
+```bash
 agt0 sql myapp -f schema.sql
+```
 
-# Interactive REPL
+The file must exist on the local filesystem.
+
+### Interactive REPL
+
+```bash
 agt0 sql myapp
 ```
 
-**Dot commands** (`.help`, `.fshelp`, `.tables`, `.schema`, `.quit`) work **only** in the **SQL** REPL above — **not** in `agt0 fs sh` (the filesystem shell has different commands such as `help` / `exit`).
+When neither `-q` nor `-f` is provided, agt0 opens an interactive SQL REPL. Type SQL statements ending with `;` to execute.
 
-In the SQL REPL, type SQL ending with `;` to execute. Example session:
+**Dot commands** (available only in the SQL REPL):
+
+| Command | Description |
+|---|---|
+| `.help` | Show all dot commands |
+| `.tables` | List all tables |
+| `.schema` | Show CREATE statements for all tables |
+| `.fshelp` | Show all `fs_*` SQL functions with usage |
+| `.quit` | Exit the REPL |
+
+Example session:
 
 ```
 agt0:myapp> SELECT * FROM users;
 agt0:myapp> .tables
 agt0:myapp> .schema
 agt0:myapp> .fshelp
-agt0:myapp> .help
 agt0:myapp> .quit
 ```
 
-### 3. Use the Virtual Filesystem
+---
 
-Every agt0 database has a built-in virtual filesystem. Files are stored inside the SQLite database itself.
+## Virtual Filesystem (CLI)
+
+Every agt0 database has a built-in virtual filesystem. Files are stored inside the SQLite database itself — not on the regular filesystem.
+
+### Upload files
 
 ```bash
-# Upload a local file
+# Single file
 agt0 fs put ./data.csv myapp:/data/data.csv
 
-# Upload a directory recursively
-agt0 fs put -r ./docs myapp:/docs
+# Entire directory (recursive)
+agt0 fs put -r ./project/src myapp:/src
+```
 
-# List files
+### List files
+
+```bash
 agt0 fs ls myapp:/
 agt0 fs ls myapp:/data/
+```
 
-# Read a file
+### Read a file
+
+```bash
 agt0 fs cat myapp:/data/data.csv
+```
 
-# Download to local
+### Download a file
+
+```bash
 agt0 fs get myapp:/data/data.csv ./downloaded.csv
+```
 
-# Delete
-agt0 fs rm myapp:/data/data.csv
+### Delete files
 
-# Create directory
+```bash
+# Single file
+agt0 fs rm myapp:/data/old.csv
+
+# Directory (recursive)
+agt0 fs rm -r myapp:/tmp/
+```
+
+### Create directories
+
+```bash
 agt0 fs mkdir myapp:/data/exports
 ```
 
-### 4. Interactive File Shell
+---
+
+## Interactive Shells
+
+### SQL REPL (`agt0 sql`)
+
+```bash
+agt0 sql myapp
+```
+
+Full SQL execution environment with dot commands. See [SQL Execution](#sql-execution) above.
+
+### Filesystem Shell (`agt0 fs sh`)
 
 ```bash
 agt0 fs sh myapp
 ```
 
+A POSIX-like interactive shell for browsing and editing the virtual filesystem.
+
 Available commands:
 
+| Command | Description |
+|---|---|
+| `ls` | List current directory |
+| `cd <dir>` | Change directory |
+| `cat <file>` | Read file content |
+| `echo <text> > <path>` | Write text to a file |
+| `mkdir <dir>` | Create directory |
+| `rm <path>` | Delete file or directory |
+| `pwd` | Print working directory |
+| `help` | Show available commands |
+| `exit` | Exit the shell |
+
+Example session:
+
 ```
-fs:/> ls                        # List current directory
-fs:/> cd data                   # Change directory
-fs:/data> cat users.csv         # Read file
-fs:/data> echo hello > test.txt # Write file
-fs:/data> mkdir exports         # Create directory
-fs:/data> rm test.txt           # Delete file
-fs:/data> pwd                   # Print working directory
-fs:/data> cd ..                 # Go up
-fs:/> exit                      # Exit shell
+fs:/> ls
+fs:/> mkdir data
+fs:/> cd data
+fs:/data> echo '{"key": "value"}' > config.json
+fs:/data> cat config.json
+fs:/data> cd ..
+fs:/> exit
 ```
 
-### 5. Default Database
-
-Set a default to omit the database name:
-
-```bash
-agt0 use myapp
-
-# Now these are equivalent:
-agt0 sql myapp -q "SELECT 1"
-agt0 sql -q "SELECT 1"
-
-# Clear the default
-agt0 use --clear
-```
+> **Note:** The filesystem shell and SQL REPL are separate interfaces. Dot commands (`.help`, `.tables`) work only in the SQL REPL. Shell commands (`ls`, `cd`, `cat`) work only in `agt0 fs sh`.
 
 ---
 
 ## SQL + FS Fusion
 
-This is agt0's core feature: **query files as tables, manipulate files from SQL**.
+This is agt0's defining feature: **query files with SQL, manipulate files from SQL**. No import scripts, no ETL pipelines.
 
-### Read/Write Files from SQL
+### Read and write files from SQL
 
 ```sql
 -- Write a configuration file
@@ -129,27 +248,19 @@ SELECT fs_write('/config/app.json', '{"debug": true, "port": 3000}');
 SELECT fs_read('/config/app.json');
 -- → {"debug": true, "port": 3000}
 
--- Parse JSON
+-- Parse JSON fields
 SELECT json_extract(fs_read('/config/app.json'), '$.port');
 -- → 3000
 
--- Append to a log
+-- Append to a log file
 SELECT fs_append('/logs/app.log', 'Started at ' || datetime('now') || char(10));
 
--- Truncate a log file (e.g. rotate)
-SELECT fs_truncate('/logs/app.log', 0);
-
--- Random access (byte offsets; read returns UTF-8 text for that byte range)
-SELECT fs_write('/data/note.txt', '0123456789012345678901234567890123456789');  -- create file first
-SELECT fs_read_at('/data/note.txt', 10, 32);
-SELECT fs_write_at('/data/patch.bin', 64, 'Hi');  -- pads with NUL bytes if offset extends past current EOF
-
--- Check existence and size (size is UTF-8 byte length of the file)
+-- Check if a file exists and its size
 SELECT fs_exists('/config/app.json'), fs_size('/config/app.json');
--- → 1, 29   -- for the JSON above: {"debug": true, "port": 3000}
+-- → 1, 29
 ```
 
-### Query CSV Files as Tables
+### Query CSV files as tables
 
 Upload a CSV and query it immediately — no `CREATE TABLE`, no import script:
 
@@ -158,21 +269,20 @@ agt0 fs put ./users.csv myapp:/data/users.csv
 ```
 
 ```sql
--- Each row is returned with _data as a JSON object
 SELECT
-  _line_number,
   json_extract(_data, '$.name') AS name,
-  json_extract(_data, '$.email') AS email
+  json_extract(_data, '$.email') AS email,
+  json_extract(_data, '$.role') AS role
 FROM fs_csv('/data/users.csv')
 WHERE json_extract(_data, '$.role') = 'admin';
 ```
 
-### Query JSONL Log Files
+Each row is returned with `_data` as a JSON object containing all columns. Access individual fields with `json_extract(_data, '$.column_name')`.
+
+### Query JSONL log files
 
 ```sql
--- Read structured logs
 SELECT
-  _line_number,
   json_extract(line, '$.timestamp') AS ts,
   json_extract(line, '$.level') AS level,
   json_extract(line, '$.message') AS msg
@@ -182,22 +292,15 @@ ORDER BY _line_number DESC
 LIMIT 10;
 ```
 
-### Glob patterns and options
-
-- `*` matches one path segment (no `/`). `**` matches at any depth. `?` matches one character (not `/`).
-- Example: `SELECT * FROM fs_csv('/imports/**/*.csv')` merges all matching CSVs; column names are the **union** of headers across files (missing values appear as JSON `null` in `_data`).
-- Optional second argument (JSON string): `exclude` (comma-separated globs; relative patterns apply as `**/name`), `strict` (fail on bad CSV/JSONL rows), `delimiter` and `header` for delimiter-separated files.
-- Safety: set `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES` to cap matches. Override install location with `AGT0_HOME`.
-
-### Query Text Files with Grep-like Power
+### Search text files (grep-like)
 
 ```sql
--- Find lines matching a pattern (like grep)
+-- Find lines matching a pattern
 SELECT _path, _line_number, line
 FROM fs_text('/logs/*.log')
 WHERE line LIKE '%ERROR%';
 
--- Count errors per file (like grep -c)
+-- Count errors per file
 SELECT _path, COUNT(*) AS error_count
 FROM fs_text('/logs/*.log')
 WHERE line LIKE '%ERROR%'
@@ -205,7 +308,7 @@ GROUP BY _path
 ORDER BY error_count DESC;
 ```
 
-### List Files (Directory Listing)
+### List files from SQL
 
 ```sql
 -- List all files and directories
@@ -214,17 +317,34 @@ FROM fs_list('/')
 ORDER BY mtime DESC;
 
 -- Find large files
-SELECT path, type, size, mtime
+SELECT path, size
 FROM fs_list('/data/')
 WHERE size > 1000000;
 ```
 
-### The Bridge: File → Table
-
-The most powerful pattern: read from files, write to tables:
+### Random access (byte-level)
 
 ```sql
--- Import CSV data into a proper table with deduplication
+-- Write a file first
+SELECT fs_write('/data/note.txt', '0123456789ABCDEF');
+
+-- Read 6 bytes starting at offset 10
+SELECT fs_read_at('/data/note.txt', 10, 6);
+-- → ABCDEF
+
+-- Overwrite at offset (pads with NUL bytes if beyond EOF)
+SELECT fs_write_at('/data/patch.bin', 64, 'patched');
+
+-- Truncate a file (e.g., log rotation)
+SELECT fs_truncate('/logs/app.log', 0);
+```
+
+### The bridge: file → table
+
+The most powerful pattern — read from files, insert into proper tables:
+
+```sql
+-- Import CSV into a typed table with deduplication
 INSERT INTO users (name, email)
 SELECT DISTINCT
   json_extract(_data, '$.name'),
@@ -233,38 +353,64 @@ FROM fs_csv('/data/import/users.csv')
 WHERE json_extract(_data, '$.email') IS NOT NULL;
 ```
 
+### Glob patterns and options
+
+**Glob syntax:**
+- `*` — matches one path segment (no `/`)
+- `**` — matches any depth (crosses directories)
+- `?` — matches one character (not `/`)
+- Example: `/data/**/*.csv` matches all CSV files under `/data/` at any depth
+
+**Table function options** (optional JSON string as 2nd argument):
+
+| Key | Type | Description |
+|---|---|---|
+| `exclude` | string | Comma-separated globs to exclude |
+| `strict` | boolean | Fail on malformed CSV/JSONL rows |
+| `delimiter` | string | Custom delimiter for CSV/TSV |
+| `header` | boolean | Whether first row is header (CSV/TSV) |
+
+Example:
+
+```sql
+SELECT * FROM fs_text('/logs/**/*.log', '{"exclude": "*.tmp,*.bak"}');
+SELECT * FROM fs_csv('/data/*.csv', '{"delimiter": ";", "header": true}');
+```
+
+When glob matches multiple files, columns are the **union** of all headers across files (missing values appear as JSON `null` in `_data`).
+
 ---
 
 ## Database Management
 
-### List Databases
+### List databases
 
 ```bash
 agt0 list
 ```
 
-Shows all databases with their size and last modified time. The default database is marked with `*`.
+Shows all databases with size and last modified time. The default database is marked with `*`.
 
-### Inspect Database
+### Inspect a database
 
 ```bash
-# Summary overview
+# Summary overview (tables, file count, total size)
 agt0 inspect myapp
 
-# List tables with row counts
+# Table list with row counts
 agt0 inspect myapp tables
 
 # Show CREATE statements
 agt0 inspect myapp schema
 ```
 
-### Export Database
+### Export a database
 
 ```bash
-# Full dump (schema + data)
+# Full dump (schema + data) to file
 agt0 dump myapp -o backup.sql
 
-# Schema only
+# Schema only (no data)
 agt0 dump myapp --ddl-only -o schema.sql
 
 # Print to stdout
@@ -274,16 +420,17 @@ agt0 dump myapp
 ### Import SQL
 
 ```bash
-# Runs the SQL file against the database (file must exist)
 agt0 seed myapp schema.sql
 ```
 
+Runs the SQL file against the database.
+
 ### Branching
 
-Create isolated copies for testing:
+Create isolated copies for testing or experimentation:
 
 ```bash
-# Create a branch
+# Create a branch (full copy of the .db file)
 agt0 branch create myapp --name staging
 
 # List branches
@@ -293,60 +440,197 @@ agt0 branch list myapp
 agt0 branch delete myapp --name staging
 ```
 
-Branches are full copies of the SQLite file. Changes to a branch don't affect the original.
+Branches are independent copies. Changes to a branch do not affect the original.
+
+### Delete a database
+
+```bash
+agt0 delete myapp --yes
+```
+
+---
+
+## Programmatic API (Node.js)
+
+agt0 can be imported as an npm module for use in your own applications:
+
+```bash
+npm install @seekcontext/agt0
+```
+
+### Basic usage
+
+```typescript
+import { createDatabase, openDatabase, fsWrite, fsRead, fsList } from '@seekcontext/agt0';
+
+// Create a new database (or open existing with openDatabase)
+const db = createDatabase('my-agent');
+
+// Write a file
+fsWrite(db, '/context/system.md', Buffer.from('You are a helpful assistant.'));
+
+// Read it back
+const content = fsRead(db, '/context/system.md');
+console.log(content?.toString('utf-8'));
+// → You are a helpful assistant.
+
+// List files
+const entries = fsList(db, '/');
+console.log(entries);
+// → [{ path: '/context', type: 'dir', size: 0, mode: 0, mtime: '...' }]
+
+db.close();
+```
+
+### SQL from code
+
+```typescript
+import { openDatabase } from '@seekcontext/agt0';
+
+const db = openDatabase('my-agent');
+
+// Use fs_* functions in SQL
+db.prepare("SELECT fs_write('/data/hello.txt', 'Hello World')").run();
+const result = db.prepare("SELECT fs_read('/data/hello.txt') AS content").get() as { content: string };
+console.log(result.content);
+
+// Query tables
+const rows = db.prepare("SELECT * FROM fs_csv('/data/users.csv')").all();
+
+db.close();
+```
+
+### Exported API
+
+| Export | Description |
+|---|---|
+| `createDatabase(name)` | Create a new database, returns `Database` |
+| `openDatabase(name)` | Open an existing database, returns `Database` |
+| `deleteDatabase(name)` | Delete a database |
+| `fsWrite(db, path, content)` | Write a file (Buffer) |
+| `fsRead(db, path)` | Read a file, returns `Buffer \| null` |
+| `fsList(db, dirPath)` | List directory entries |
+| `AGT0_HOME` | Base directory path (`~/.agt0`) |
+| `DATABASES_DIR` | Databases directory path |
+| `dbPath(name)` | Get full path for a database name |
+| `dbExists(name)` | Check if a database exists |
+| `listDatabases()` | List all database names |
+| `loadConfig()` / `saveConfig(config)` | Read/write global config |
+| `resolveDbName(name?)` | Resolve database name (with default fallback) |
 
 ---
 
 ## Recipes
 
-### Recipe 1: Project Context for a Coding Agent
+### Recipe 1: Agent persistent memory
 
-Requires a local `./src` tree. Use `**` so nested `.ts` files match (single `*` only matches one path segment).
+Store agent context and preferences that survive across sessions:
 
 ```bash
-agt0 init project-context
-agt0 fs put -r ./src project-context:/src
-agt0 fs put ./package.json project-context:/package.json
-agt0 sql project-context -q "
-  SELECT _path, COUNT(*) as lines
-  FROM fs_text('/src/**/*.ts')
-  GROUP BY _path
-  ORDER BY lines DESC"
+agt0 init agent-memory
+agt0 sql agent-memory -q "
+  SELECT fs_write('/memory/preferences.json', '{
+    \"theme\": \"dark\",
+    \"language\": \"en\",
+    \"verbosity\": \"concise\"
+  }')
+"
+
+# Later: read preferences back
+agt0 sql agent-memory -q "
+  SELECT json_extract(fs_read('/memory/preferences.json'), '$.theme')
+"
+# → dark
+
+# Append conversation summaries
+agt0 sql agent-memory -q "
+  SELECT fs_append('/memory/history.md',
+    '## Session ' || datetime('now') || char(10) ||
+    'User asked about database design.' || char(10) || char(10))
+"
 ```
 
-### Recipe 2: Log Analysis
+### Recipe 2: Project context for a coding agent
+
+Index an entire codebase for analysis:
+
+```bash
+agt0 init project-ctx
+agt0 fs put -r ./src project-ctx:/src
+agt0 fs put ./package.json project-ctx:/package.json
+
+# Lines per file
+agt0 sql project-ctx -q "
+  SELECT _path, COUNT(*) AS lines
+  FROM fs_text('/src/**/*.ts')
+  GROUP BY _path
+  ORDER BY lines DESC
+"
+
+# Find all TODO comments
+agt0 sql project-ctx -q "
+  SELECT _path, _line_number, line
+  FROM fs_text('/src/**/*.ts')
+  WHERE line LIKE '%TODO%'
+  ORDER BY _path, _line_number
+"
+```
+
+### Recipe 3: Log analysis
 
 ```bash
 agt0 init logs-db
 agt0 fs put ./app.jsonl logs-db:/logs/app.jsonl
 
+# Error distribution by level
 agt0 sql logs-db -q "
   SELECT
     json_extract(line, '$.level') AS level,
     COUNT(*) AS count
   FROM fs_jsonl('/logs/app.jsonl')
   GROUP BY level
-  ORDER BY count DESC"
+  ORDER BY count DESC
+"
+
+# Recent errors with context
+agt0 sql logs-db -q "
+  SELECT
+    json_extract(line, '$.timestamp') AS ts,
+    json_extract(line, '$.message') AS msg
+  FROM fs_jsonl('/logs/app.jsonl')
+  WHERE json_extract(line, '$.level') = 'error'
+  ORDER BY _line_number DESC
+  LIMIT 20
+"
 ```
 
-### Recipe 3: Configuration Management
+### Recipe 4: Configuration management
 
 ```bash
 agt0 init config
-# One line (avoids shell newline/quoting issues):
-agt0 sql config -q "SELECT fs_write('/env/production.json', '{\"database_url\":\"postgres://...\",\"redis_url\":\"redis://...\",\"debug\":false}')"
 
-# Or multi-line JSON inside single-quoted SQL (bash keeps newlines inside double quotes):
+# Store environment configs
 agt0 sql config -q "SELECT fs_write('/env/production.json', '{
-  \"database_url\": \"postgres://...\",
-  \"redis_url\": \"redis://...\",
+  \"database_url\": \"postgres://prod:5432/app\",
+  \"redis_url\": \"redis://prod:6379\",
   \"debug\": false
 }')"
 
-agt0 sql config -q "SELECT json_extract(fs_read('/env/production.json'), '$.database_url')"
+agt0 sql config -q "SELECT fs_write('/env/staging.json', '{
+  \"database_url\": \"postgres://stage:5432/app\",
+  \"redis_url\": \"redis://stage:6379\",
+  \"debug\": true
+}')"
+
+# Compare configs
+agt0 sql config -q "
+  SELECT
+    json_extract(fs_read('/env/production.json'), '$.debug') AS prod_debug,
+    json_extract(fs_read('/env/staging.json'), '$.debug') AS stage_debug
+"
 ```
 
-### Recipe 4: Data Pipeline
+### Recipe 5: Data pipeline (CSV → Table → Report)
 
 ```bash
 agt0 init pipeline
@@ -354,7 +638,7 @@ agt0 init pipeline
 # Upload raw data
 agt0 fs put ./raw-sales.csv pipeline:/raw/sales.csv
 
-# Create clean table and import
+# Create typed table and import
 agt0 sql pipeline -q "
   CREATE TABLE sales (
     date TEXT, product TEXT, amount REAL, region TEXT
@@ -371,50 +655,79 @@ agt0 sql pipeline -q "
 # Analyze
 agt0 sql pipeline -q "
   SELECT region, SUM(amount) AS total
-  FROM sales GROUP BY region ORDER BY total DESC"
+  FROM sales GROUP BY region ORDER BY total DESC
+"
 
-# Export results back to filesystem
+# Export summary back to filesystem as JSON
 agt0 sql pipeline -q "
   SELECT fs_write('/reports/summary.json', (
     SELECT json_group_array(json_object('region', region, 'total', total))
-    FROM (SELECT region, SUM(amount) as total FROM sales GROUP BY region)
-  ))"
+    FROM (SELECT region, SUM(amount) AS total FROM sales GROUP BY region)
+  ))
+"
+```
+
+### Recipe 6: Multi-file merge and analysis
+
+```bash
+agt0 init analytics
+
+# Upload multiple CSVs
+agt0 fs put ./jan-sales.csv analytics:/data/jan-sales.csv
+agt0 fs put ./feb-sales.csv analytics:/data/feb-sales.csv
+agt0 fs put ./mar-sales.csv analytics:/data/mar-sales.csv
+
+# Query across ALL CSVs with a single glob
+agt0 sql analytics -q "
+  SELECT
+    _path,
+    COUNT(*) AS rows,
+    SUM(CAST(json_extract(_data, '$.amount') AS REAL)) AS total
+  FROM fs_csv('/data/**/*.csv')
+  GROUP BY _path
+"
 ```
 
 ---
 
-## Using as a Library
+## Environment Variables
 
-agt0 can be imported as an npm module:
+| Variable | Description | Default |
+|---|---|---|
+| `AGT0_HOME` | Override storage directory | `~/.agt0` |
+| `AGT0_FS_MAX_FILES` | Max files matched by glob | unlimited |
+| `AGT0_FS_MAX_FILE_BYTES` | Max bytes per file in table functions | unlimited |
+| `AGT0_FS_MAX_TOTAL_BYTES` | Max total bytes across all matched files | unlimited |
 
-```typescript
-import { createDatabase, openDatabase, fsWrite, fsRead, fsList } from '@seekcontext/agt0';
+---
 
-// Create a new database
-const db = createDatabase('my-agent');
+## SQL Function Quick Reference
 
-// Write a file
-fsWrite(db, '/context/system.md', Buffer.from('You are a helpful assistant.'));
+### Scalar Functions
 
-// Read it back
-const content = fsRead(db, '/context/system.md');
-console.log(content?.toString('utf-8'));
+| Function | Returns | Description |
+|---|---|---|
+| `fs_read(path)` | TEXT | Read file content |
+| `fs_write(path, content)` | INTEGER | Write file, returns bytes written |
+| `fs_append(path, data)` | INTEGER | Append to file, returns total bytes |
+| `fs_exists(path)` | INTEGER | 1 if exists, 0 otherwise |
+| `fs_size(path)` | INTEGER | File size in bytes |
+| `fs_mtime(path)` | TEXT | Last modified (ISO 8601) |
+| `fs_remove(path [, recursive])` | INTEGER | Delete, returns count |
+| `fs_mkdir(path [, recursive])` | INTEGER | Create directory |
+| `fs_truncate(path, size)` | INTEGER | Truncate to byte size |
+| `fs_read_at(path, offset, length)` | TEXT | Read byte range as UTF-8 |
+| `fs_write_at(path, offset, data)` | INTEGER | Write at byte offset |
 
-// List files
-const entries = fsList(db, '/');
-console.log(entries);
+### Table-Valued Functions
 
-// Execute SQL (note: use single quotes for SQL string literals)
-const rows = db.prepare("SELECT * FROM fs_list('/')").all();
-console.log(rows);
-
-// Use fs functions in SQL
-db.prepare("SELECT fs_write('/data/hello.txt', 'Hello World')").run();
-const result = db.prepare("SELECT fs_read('/data/hello.txt') AS content").get();
-console.log(result);
-
-db.close();
-```
+| Function | Columns | Description |
+|---|---|---|
+| `fs_list(dir_path)` | path, type, size, mode, mtime | Directory listing |
+| `fs_text(path [, opts])` | _line_number, line, _path | Text file lines |
+| `fs_csv(path [, opts])` | _line_number, _data, _path | CSV rows (JSON) |
+| `fs_tsv(path [, opts])` | _line_number, _data, _path | TSV rows (JSON) |
+| `fs_jsonl(path [, opts])` | _line_number, line, _path | JSONL lines |
 
 ---
 
@@ -422,7 +735,7 @@ db.close();
 
 ### "Database not found"
 
-Make sure you've created the database first:
+Create the database first:
 
 ```bash
 agt0 init myapp
@@ -430,7 +743,7 @@ agt0 init myapp
 
 ### "No database specified"
 
-Either pass the database name explicitly or set a default:
+Either pass the database name or set a default:
 
 ```bash
 agt0 use myapp
@@ -438,15 +751,31 @@ agt0 use myapp
 
 ### better-sqlite3 installation fails
 
-If npm can't install the native module:
-
 ```bash
-# Try rebuilding
+# Rebuild the native module
 npm rebuild better-sqlite3
 
-# Or install with node-gyp
+# If that fails, ensure build tools are installed
 npm install -g node-gyp
 npm rebuild better-sqlite3
+```
+
+### Permission errors on `~/.agt0`
+
+Ensure the directory is writable:
+
+```bash
+mkdir -p ~/.agt0/databases
+chmod -R u+rw ~/.agt0
+```
+
+### Override storage location
+
+If you can't use `~/.agt0`, set the `AGT0_HOME` environment variable:
+
+```bash
+export AGT0_HOME=/path/to/my/storage
+agt0 init myapp
 ```
 
 ### Reset everything
@@ -454,3 +783,5 @@ npm rebuild better-sqlite3
 ```bash
 rm -rf ~/.agt0
 ```
+
+This deletes all databases and configuration. Not reversible.

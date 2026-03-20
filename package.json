@@ -1,6 +1,6 @@
 {
   "name": "@seekcontext/agt0",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "One file. All your agent needs. Local-first storage for AI agents — database, filesystem, and memory in a single SQLite file.",
   "type": "module",
   "bin": {
@@ -49,7 +49,8 @@
   "files": [
     "dist",
     "skill.md",
-    "README.md"
+    "README.md",
+    "USER_MANUAL.md"
   ],
   "dependencies": {
     "better-sqlite3": "^12.8.0",
