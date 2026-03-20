@@ -78,6 +78,20 @@ WHERE line LIKE '%TODO%';
 SELECT path, type, size, mtime FROM fs_list('/data/');
 ```
 
+### CSV / JSONL with real columns (virtual tables; single file only)
+
+Use **`CREATE VIRTUAL TABLE ... USING csv_expand(...)`** / **`tsv_expand`** / **`jsonl_expand`** when you want **native column names** instead of `json_extract(_data, ...)`. **No globs** — one path per `CREATE`. For `**/*.csv` patterns, keep using `fs_csv` / `fs_jsonl`.
+
+```sql
+CREATE VIRTUAL TABLE v_users USING csv_expand('/data/users.csv');
+SELECT name, email FROM v_users WHERE role = 'admin';
+
+CREATE VIRTUAL TABLE v_logs USING jsonl_expand('/logs/app.jsonl');
+SELECT level, msg FROM v_logs WHERE level = 'error';
+```
+
+Schema is fixed at `CREATE` time; `DROP` and recreate if the file layout changes. JSONL columns = sorted union of object keys from the first `AGT0_FS_EXPAND_JSONL_SCAN_LINES` non-empty lines (default `256`). Optional 2nd arg: same JSON as TVFs (`strict`, `delimiter`, `header`, etc.).
+
 ### Import file data into tables
 
 ```sql
@@ -119,11 +133,19 @@ WHERE json_extract(_data, '$.email') IS NOT NULL;
 | `fs_tsv(path [, opts])` | _line_number, _data, _path | Read TSV (row → JSON) |
 | `fs_jsonl(path [, opts])` | _line_number, line, _path | Read JSONL by line |
 
+**Virtual table modules** (dynamic columns; **single path**, no globs):
+
+| Module | Example |
+|---|---|
+| `csv_expand` | `CREATE VIRTUAL TABLE t USING csv_expand('/data/x.csv' [, opts])` |
+| `tsv_expand` | `CREATE VIRTUAL TABLE t USING tsv_expand('/data/x.tsv' [, opts])` |
+| `jsonl_expand` | `CREATE VIRTUAL TABLE t USING jsonl_expand('/logs/x.jsonl' [, opts])` |
+
 **Path globs:** `*` = one segment, `**` = any depth, `?` = one char. Example: `/logs/**/*.log`.
 
-**Options** (JSON string, 2nd arg): `exclude` (comma-separated globs), `strict` (bool — fail on bad rows), `delimiter` (string), `header` (bool).
+**Options** (JSON string, 2nd arg): `exclude` (comma-separated globs), `strict` (bool — fail on bad rows), `delimiter` (string), `header` (bool). (`exclude` is ignored by `*_expand` modules.)
 
-**Limits** (env vars): `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`, `AGT0_FS_MAX_ROWS` (optional cap per TVF scan), `AGT0_FS_PARSE_CHUNK_BYTES`, `AGT0_FS_PREVIEW_BYTES` (multi-file CSV/TSV column discovery).
+**Limits** (env vars): `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`, `AGT0_FS_MAX_ROWS` (optional cap per TVF / expand scan), `AGT0_FS_PARSE_CHUNK_BYTES`, `AGT0_FS_PREVIEW_BYTES` (multi-file CSV/TSV column discovery), `AGT0_FS_EXPAND_JSONL_SCAN_LINES` (JSONL key discovery for `jsonl_expand`).
 
 ---
 
@@ -184,7 +206,7 @@ Override with `AGT0_HOME` env var.
 - All data is **local**. No network calls, no API keys.
 - Each database is a **single `.db` file**. Copy it to back up or share.
 - The `_fs` table is internal. **Never drop it.**
-- CSV rows are returned as JSON in the `_data` column. Access fields via `json_extract(_data, '$.column_name')`.
+- CSV rows from **`fs_csv`** are JSON in `_data` (`json_extract(_data, '$.column_name')`), or use **`csv_expand`** / **`tsv_expand`** for real columns after `CREATE VIRTUAL TABLE`.
 - `fs_read_at` / `fs_write_at` operate on **byte** offsets.
 - The SQL REPL (`.fshelp`) and the filesystem shell (`help`) are **different** interfaces with different commands.
 - Glob `*` matches one path segment (no `/`). Use `**` to match across directories.

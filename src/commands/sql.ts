@@ -123,6 +123,23 @@ function printFsSqlHelp(): void {
     ),
   );
   console.log();
+  console.log(chalk.bold('Virtual table modules (single file path; real columns)'));
+  console.log(
+    chalk.dim(
+      '  CREATE VIRTUAL TABLE t USING csv_expand(\'/path/file.csv\' [, options])',
+    ),
+  );
+  console.log(
+    chalk.dim(
+      '  CREATE VIRTUAL TABLE t USING tsv_expand(\'/path/file.tsv\' [, options])',
+    ),
+  );
+  console.log(
+    chalk.dim(
+      '  CREATE VIRTUAL TABLE t USING jsonl_expand(\'/path/file.jsonl\' [, options])',
+    ),
+  );
+  console.log();
   console.log(chalk.bold('Glob rules'));
   console.log(
     chalk.dim(

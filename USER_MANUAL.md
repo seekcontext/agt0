@@ -279,6 +279,28 @@ WHERE json_extract(_data, '$.role') = 'admin';
 
 Each row is returned with `_data` as a JSON object containing all columns. Access individual fields with `json_extract(_data, '$.column_name')`.
 
+### Dynamic columns: `csv_expand`, `tsv_expand`, `jsonl_expand`
+
+When you want **real column names** (no `json_extract` on `_data` / `line`), create a **virtual table** for one file. The path must be a **single file** — **globs are not allowed** (use `fs_csv` / `fs_tsv` / `fs_jsonl` for patterns).
+
+```sql
+CREATE VIRTUAL TABLE v_users USING csv_expand('/data/users.csv');
+SELECT name, email FROM v_users WHERE role = 'admin';
+
+CREATE VIRTUAL TABLE v_sales USING tsv_expand('/data/export.tsv');
+
+CREATE VIRTUAL TABLE v_logs USING jsonl_expand('/logs/app.jsonl');
+SELECT level, COUNT(*) FROM v_logs GROUP BY level;
+```
+
+Optional **2nd argument**: same JSON options string as the TVFs (`exclude` applies only to other APIs; for expand it is ignored). Examples: `'{"strict": true}'`, `'{"header": false}'`, `'{"delimiter": "|"}'` (for `csv_expand`).
+
+**JSONL schema:** columns are the sorted **union** of keys from JSON **objects** in the first `AGT0_FS_EXPAND_JSONL_SCAN_LINES` non-empty lines (default `256`). Values that are nested objects/arrays are stored as JSON **text**. If `strict` is `false`, a nullable `_raw` column is included: valid object lines have `_raw` SQL `NULL`; bad lines store the source line in `_raw`. If no object keys are found, the table has `_line_number`, `_path`, and either `_raw` (non-strict) or `line` (strict).
+
+**CSV/TSV:** if a normal header cannot be inferred from the preview, the virtual table has `_line_number`, `_path`, `_raw` only (one row per non-empty line). Otherwise each header becomes a column (names may be prefixed to avoid clashes with `_line_number` / `_path` / `_raw`).
+
+**Lifecycle:** the schema is fixed when you run `CREATE VIRTUAL TABLE`. If the file layout changes, run `DROP TABLE v_users` (or your name) and create it again.
+
 ### Query JSONL log files
 
 ```sql
@@ -698,9 +720,10 @@ agt0 sql analytics -q "
 | `AGT0_FS_MAX_FILES` | Max files matched by glob | `10000` |
 | `AGT0_FS_MAX_FILE_BYTES` | Max bytes per file in table functions | `64MiB` |
 | `AGT0_FS_MAX_TOTAL_BYTES` | Max total bytes across all matched files | `100MiB` |
-| `AGT0_FS_MAX_ROWS` | Max rows emitted per `fs_csv` / `fs_tsv` / `fs_text` / `fs_jsonl` scan (`0` = off) | off |
+| `AGT0_FS_MAX_ROWS` | Max rows emitted per `fs_csv` / `fs_tsv` / `fs_text` / `fs_jsonl` / `*_expand` scan (`0` = off) | off |
 | `AGT0_FS_PARSE_CHUNK_BYTES` | Chunk size when incrementally parsing CSV/TSV (bytes) | `2MiB` |
 | `AGT0_FS_PREVIEW_BYTES` | Bytes read per file to discover CSV/TSV columns when a glob matches multiple files | `256KiB` |
+| `AGT0_FS_EXPAND_JSONL_SCAN_LINES` | For `jsonl_expand`, max non-empty lines scanned at `CREATE` time to infer column keys | `256` |
 
 ---
 
@@ -731,6 +754,14 @@ agt0 sql analytics -q "
 | `fs_csv(path [, opts])` | _line_number, _data, _path | CSV rows (JSON) |
 | `fs_tsv(path [, opts])` | _line_number, _data, _path | TSV rows (JSON) |
 | `fs_jsonl(path [, opts])` | _line_number, line, _path | JSONL lines |
+
+### Virtual table modules (single path; dynamic columns)
+
+| Module | Usage | Notes |
+|---|---|---|
+| `csv_expand` | `CREATE VIRTUAL TABLE t USING csv_expand('/path.csv' [, opts])` | Columns from CSV header; no globs |
+| `tsv_expand` | `CREATE VIRTUAL TABLE t USING tsv_expand('/path.tsv' [, opts])` | Tab-separated; same options as `fs_tsv` |
+| `jsonl_expand` | `CREATE VIRTUAL TABLE t USING jsonl_expand('/path.jsonl' [, opts])` | Union of object keys from first N lines (see `AGT0_FS_EXPAND_JSONL_SCAN_LINES`) |
 
 ---
 

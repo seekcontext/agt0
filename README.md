@@ -109,6 +109,13 @@ GROUP BY level;
 INSERT INTO users (name, email)
 SELECT DISTINCT json_extract(_data, '$.name'), json_extract(_data, '$.email')
 FROM fs_csv('/data/import/users.csv');
+
+-- Dynamic columns: one-time CREATE, then query like a normal table (single path only; no globs)
+CREATE VIRTUAL TABLE v_users USING csv_expand('/data/users.csv');
+SELECT name, email FROM v_users WHERE role = 'admin';
+
+CREATE VIRTUAL TABLE v_logs USING jsonl_expand('/logs/app.jsonl');
+SELECT level, msg FROM v_logs WHERE level = 'error';
 ```
 
 ### Virtual Filesystem
@@ -225,6 +232,23 @@ agt0
 | `fs_jsonl(path [, options])` | _line_number, line, _path | Read JSONL files |
 
 Path patterns support `*`, `?`, and `**` globs. Optional `options` is a JSON string with keys: `exclude`, `strict`, `delimiter`, `header`. Safety limits via `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`, `AGT0_FS_MAX_ROWS` (cap rows per TVF scan), `AGT0_FS_PARSE_CHUNK_BYTES` (CSV/TSV incremental parse chunk size), and `AGT0_FS_PREVIEW_BYTES` (per-file header preview when a glob matches multiple CSV/TSV files). Table-valued functions stream-parse delimited files so peak memory stays closer to one on-disk copy plus parser state, not a full parsed row array.
+
+### Virtual table modules (`csv_expand`, `tsv_expand`, `jsonl_expand`)
+
+For a **single virtual file path** (no globs), register a virtual table so CSV/TSV/JSONL fields appear as **real SQL columns** (no `json_extract` on `_data`).
+
+```sql
+CREATE VIRTUAL TABLE sales USING csv_expand('/data/report.csv');
+SELECT product, amount FROM sales WHERE CAST(amount AS REAL) > 100;
+
+CREATE VIRTUAL TABLE events USING jsonl_expand('/logs/events.jsonl', '{"strict": true}');
+SELECT level, msg FROM events WHERE level = 'error';
+```
+
+- **Globs are not supported** — use `fs_csv` / `fs_tsv` / `fs_jsonl` when you need `*` / `**`.
+- **Schema is fixed at `CREATE VIRTUAL TABLE` time** — if the file changes shape, `DROP` the virtual table and create it again.
+- **`jsonl_expand`** infers columns from the union of object keys in the first *N* non-empty lines (`AGT0_FS_EXPAND_JSONL_SCAN_LINES`, default `256`). Nested JSON values are returned as JSON text. With `strict: false`, an extra `_raw` column holds the original line when a row is not a valid JSON object (valid object rows have `_raw` SQL `NULL`).
+- **`csv_expand` / `tsv_expand`** accept the same JSON `options` as `fs_csv` / `fs_tsv` (2nd argument). If the file cannot be parsed as structured rows from the header preview, the table exposes `_line_number`, `_path`, and `_raw` (one line per row).
 
 ## Data Storage
 

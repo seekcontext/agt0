@@ -222,6 +222,104 @@ describe('fs TVF and scalars', () => {
     }
   });
 
+  it('csv_expand exposes CSV headers as real columns', async () => {
+    const { createDatabase, openDatabase, deleteDatabase } = await import(
+      '../src/core/database.js'
+    );
+    const { fsWrite } = await import('../src/core/virtual-fs.js');
+    const name = uniqName();
+    createDatabase(name);
+    const db = openDatabase(name);
+    try {
+      fsWrite(
+        db,
+        '/data/users.csv',
+        Buffer.from('name,role\nAlice,admin\nBob,user\n'),
+      );
+      db.exec(
+        `CREATE VIRTUAL TABLE v_users USING csv_expand('/data/users.csv')`,
+      );
+      const rows = db
+        .prepare(
+          `SELECT name, role FROM v_users WHERE role = 'admin' ORDER BY name`,
+        )
+        .all() as { name: string; role: string }[];
+      expect(rows).toEqual([{ name: 'Alice', role: 'admin' }]);
+    } finally {
+      db.close();
+      deleteDatabase(name);
+    }
+  });
+
+  it('tsv_expand reads tab-separated files', async () => {
+    const { createDatabase, openDatabase, deleteDatabase } = await import(
+      '../src/core/database.js'
+    );
+    const { fsWrite } = await import('../src/core/virtual-fs.js');
+    const name = uniqName();
+    createDatabase(name);
+    const db = openDatabase(name);
+    try {
+      fsWrite(db, '/t/items.tsv', Buffer.from('sku\tqty\nA\t10\n'));
+      db.exec(`CREATE VIRTUAL TABLE v_items USING tsv_expand('/t/items.tsv')`);
+      const row = db
+        .prepare(`SELECT sku, qty FROM v_items`)
+        .get() as { sku: string; qty: string };
+      expect(row).toEqual({ sku: 'A', qty: '10' });
+    } finally {
+      db.close();
+      deleteDatabase(name);
+    }
+  });
+
+  it('jsonl_expand unions keys across lines', async () => {
+    const { createDatabase, openDatabase, deleteDatabase } = await import(
+      '../src/core/database.js'
+    );
+    const { fsWrite } = await import('../src/core/virtual-fs.js');
+    const name = uniqName();
+    createDatabase(name);
+    const db = openDatabase(name);
+    try {
+      fsWrite(
+        db,
+        '/logs/e.jsonl',
+        Buffer.from(
+          '{"level":"info","msg":"a"}\n{"level":"error","msg":"b","code":1}\n',
+        ),
+      );
+      db.exec(`CREATE VIRTUAL TABLE v_logs USING jsonl_expand('/logs/e.jsonl')`);
+      const err = db
+        .prepare(
+          `SELECT msg, code FROM v_logs WHERE level = 'error'`,
+        )
+        .get() as { msg: string; code: number };
+      expect(err).toEqual({ msg: 'b', code: 1 });
+    } finally {
+      db.close();
+      deleteDatabase(name);
+    }
+  });
+
+  it('csv_expand rejects glob paths', async () => {
+    const { createDatabase, openDatabase, deleteDatabase } = await import(
+      '../src/core/database.js'
+    );
+    const { fsWrite } = await import('../src/core/virtual-fs.js');
+    const name = uniqName();
+    createDatabase(name);
+    const db = openDatabase(name);
+    try {
+      fsWrite(db, '/g/x.csv', Buffer.from('a\n1\n'));
+      expect(() => {
+        db.exec(`CREATE VIRTUAL TABLE bad USING csv_expand('/g/*.csv')`);
+      }).toThrow(/no globs/);
+    } finally {
+      db.close();
+      deleteDatabase(name);
+    }
+  });
+
   it('fs_list normalizes dir path', async () => {
     const { createDatabase, openDatabase, deleteDatabase } = await import(
       '../src/core/database.js'

@@ -12,6 +12,7 @@ import {
   normalizeVirtualPath,
   parseFsTableOptions,
   pathMatchesAny,
+  readFsExpandJsonlScanLines,
   readFsLimits,
   readFsMaxRows,
   readFsParseChunkBytes,
@@ -62,8 +63,48 @@ type DelimitedOpts = FsTableOptions & { delimiter: string };
 
 type FileMeta = { path: string; size: number };
 
+const RESERVED_EXPAND_COLS = new Set([
+  '_line_number',
+  '_path',
+  '_raw',
+  'path',
+  'options',
+]);
+
+/** Strip SQLite single-quoted string literals from CREATE VIRTUAL TABLE argv tokens. */
+function stripSqlStringLiteral(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  if (s.length >= 2 && s[0] === "'" && s[s.length - 1] === "'") {
+    return s.slice(1, -1).replace(/''/g, "'");
+  }
+  return s;
+}
+
+/** Make CSV/JSONL field names safe and unique as SQLite column identifiers. */
+function sanitizeExpandFieldNames(rawKeys: string[]): string[] {
+  const used = new Set<string>(['_line_number', '_path', '_raw']);
+  const out: string[] = [];
+  for (let i = 0; i < rawKeys.length; i++) {
+    let base = rawKeys[i].trim();
+    if (!base) base = `column_${i + 1}`;
+    if (RESERVED_EXPAND_COLS.has(base)) {
+      base = `field_${base}`;
+    }
+    let name = base;
+    let n = 0;
+    while (used.has(name)) {
+      n += 1;
+      name = `${base}_${n}`;
+    }
+    used.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
 /**
- * Register table-valued functions (fs_list, fs_text, fs_csv, fs_tsv, fs_jsonl).
+ * Register table-valued functions (fs_list, fs_text, fs_csv, fs_tsv, fs_jsonl)
+ * and virtual table modules (csv_expand, tsv_expand, jsonl_expand).
  *
  * Same as scalar functions: all SQL inside generators must go through a
  * dedicated helper connection to avoid "busy" errors.
@@ -422,6 +463,317 @@ export function registerTableFunctions(db: DatabaseType): void {
       return out;
     }
   }
+
+  function unionKeysFromJsonlBuffer(buf: Buffer, maxLines: number): string[] {
+    const keys = new Set<string>();
+    let seen = 0;
+    for (const line of iterateUtf8Lines(buf)) {
+      const t = line.trim();
+      if (!t) continue;
+      seen += 1;
+      if (seen > maxLines) break;
+      try {
+        const o = JSON.parse(t) as unknown;
+        if (o !== null && typeof o === 'object' && !Array.isArray(o)) {
+          for (const k of Object.keys(o as Record<string, unknown>)) {
+            keys.add(k);
+          }
+        }
+      } catch {
+        /* skip bad lines during schema probe */
+      }
+    }
+    return [...keys].sort();
+  }
+
+  function delimitedExpandDefinition(
+    pathArg: unknown,
+    optionsArg: unknown,
+    fixedDelimiter: string | null,
+    moduleLabel: string,
+  ) {
+    const vfsPath = normalizeVirtualPath(stripSqlStringLiteral(pathArg));
+    const patternRaw = normalizeGlobPattern(vfsPath);
+    if (isGlobPattern(patternRaw)) {
+      throw new Error(
+        `agt0 fs: ${moduleLabel} requires a single virtual file path (no globs); use fs_csv or fs_tsv for glob patterns`,
+      );
+    }
+    const path = vfsPath;
+    const limits = readFsLimits();
+    const meta = stmtFileMeta.get(path) as FileMeta | undefined;
+    if (!meta) {
+      throw new Error(`agt0 fs: no such file: ${path}`);
+    }
+    if (meta.size > limits.maxFileBytes) {
+      throw new Error(
+        `agt0 fs: file ${path} is ${meta.size} bytes, exceeds AGT0_FS_MAX_FILE_BYTES (${limits.maxFileBytes})`,
+      );
+    }
+
+    const optStr =
+      optionsArg !== undefined && optionsArg !== null && String(optionsArg).trim() !== ''
+        ? stripSqlStringLiteral(optionsArg)
+        : '';
+    const baseOpts = parseFsTableOptions(optStr || undefined);
+    const merged: DelimitedOpts = {
+      ...baseOpts,
+      delimiter:
+        fixedDelimiter !== null ? fixedDelimiter : baseOpts.delimiter || ',',
+    };
+
+    const buf = readFileBuffer(path);
+    if (!buf || buf.length === 0) {
+      return {
+        columns: ['_line_number', '_path'],
+        parameters: [],
+        *rows() {
+          /* empty file */
+        },
+      };
+    }
+
+    const previewBytes = readFsPreviewBytes();
+    const slice = buf.subarray(0, Math.min(buf.length, previewBytes));
+    let rawKeys = keysFromDelimitedPreview(slice, merged);
+    let rawMode = false;
+    if (!rawKeys.length) {
+      rawMode = true;
+    }
+
+    if (rawMode) {
+      return {
+        columns: ['_line_number', '_path', '_raw'],
+        parameters: [],
+        *rows() {
+          const maxRows = readFsMaxRows();
+          const emitted = { n: 0 };
+          let i = 0;
+          for (const line of iterateUtf8Lines(buf)) {
+            if (!line.trim()) continue;
+            i += 1;
+            emitted.n += 1;
+            assertUnderRowLimit(emitted, maxRows);
+            yield { _line_number: i, _path: path, _raw: line };
+          }
+        },
+      };
+    }
+
+    const sanitized = sanitizeExpandFieldNames(rawKeys);
+    const columns = ['_line_number', '_path', ...sanitized];
+
+    return {
+      columns,
+      parameters: [],
+      *rows() {
+        const maxRows = readFsMaxRows();
+        const emitted = { n: 0 };
+        const chunkSize = readFsParseChunkBytes();
+        const acc: Record<string, unknown>[] = [];
+        try {
+          parseDelimitedBufferChunked(buf, merged, chunkSize, (record) => {
+            const row: Record<string, unknown> = {};
+            if (!merged.header) {
+              const arr = record as string[];
+              for (let i = 0; i < rawKeys.length; i++) {
+                row[sanitized[i]] = arr[i] ?? null;
+              }
+            } else {
+              const obj = record as Record<string, string>;
+              for (let i = 0; i < rawKeys.length; i++) {
+                row[sanitized[i]] = obj[rawKeys[i]] ?? null;
+              }
+            }
+            acc.push(row);
+          });
+        } catch (e) {
+          throw new Error(
+            `agt0 fs: ${moduleLabel} parse error for ${path}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+
+        let lineNo = 0;
+        for (const data of acc) {
+          lineNo += 1;
+          emitted.n += 1;
+          assertUnderRowLimit(emitted, maxRows);
+          yield {
+            _line_number: lineNo,
+            _path: path,
+            ...data,
+          };
+        }
+      },
+    };
+  }
+
+  function jsonlExpandDefinition(pathArg: unknown, optionsArg: unknown) {
+    const vfsPath = normalizeVirtualPath(stripSqlStringLiteral(pathArg));
+    const patternRaw = normalizeGlobPattern(vfsPath);
+    if (isGlobPattern(patternRaw)) {
+      throw new Error(
+        'agt0 fs: jsonl_expand requires a single virtual file path (no globs); use fs_jsonl for glob patterns',
+      );
+    }
+    const path = vfsPath;
+    const limits = readFsLimits();
+    const meta = stmtFileMeta.get(path) as FileMeta | undefined;
+    if (!meta) {
+      throw new Error(`agt0 fs: no such file: ${path}`);
+    }
+    if (meta.size > limits.maxFileBytes) {
+      throw new Error(
+        `agt0 fs: file ${path} is ${meta.size} bytes, exceeds AGT0_FS_MAX_FILE_BYTES (${limits.maxFileBytes})`,
+      );
+    }
+
+    const optStr =
+      optionsArg !== undefined && optionsArg !== null && String(optionsArg).trim() !== ''
+        ? stripSqlStringLiteral(optionsArg)
+        : '';
+    const opts = parseFsTableOptions(optStr || undefined);
+    const scanLines = readFsExpandJsonlScanLines();
+    const buf = readFileBuffer(path);
+
+    if (!buf || buf.length === 0) {
+      return {
+        columns: ['_line_number', '_path'],
+        parameters: [],
+        *rows() {
+          /* empty */
+        },
+      };
+    }
+
+    let rawKeys = unionKeysFromJsonlBuffer(buf, scanLines);
+    const includeRaw = !opts.strict;
+    if (!rawKeys.length) {
+      return {
+        columns: includeRaw
+          ? ['_line_number', '_path', '_raw']
+          : ['_line_number', '_path', 'line'],
+        parameters: [],
+        *rows() {
+          const maxRows = readFsMaxRows();
+          const emitted = { n: 0 };
+          let i = 0;
+          for (const line of iterateUtf8Lines(buf)) {
+            if (!line.trim()) continue;
+            i += 1;
+            emitted.n += 1;
+            assertUnderRowLimit(emitted, maxRows);
+            if (includeRaw) {
+              yield { _line_number: i, _path: path, _raw: line };
+            } else {
+              yield { _line_number: i, _path: path, line };
+            }
+          }
+        },
+      };
+    }
+
+    const sanitized = sanitizeExpandFieldNames(rawKeys);
+    const columns = includeRaw
+      ? ['_line_number', '_path', ...sanitized, '_raw']
+      : ['_line_number', '_path', ...sanitized];
+
+    return {
+      columns,
+      parameters: [],
+      *rows() {
+        const maxRows = readFsMaxRows();
+        const emitted = { n: 0 };
+        let i = 0;
+        for (const line of iterateUtf8Lines(buf)) {
+          if (!line.trim()) continue;
+          i += 1;
+          emitted.n += 1;
+          assertUnderRowLimit(emitted, maxRows);
+          try {
+            const parsed = JSON.parse(line) as unknown;
+            if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+              if (opts.strict) {
+                throw new Error(
+                  `agt0 fs: jsonl_expand: line ${i} in ${path} is not a JSON object`,
+                );
+              }
+              const row: Record<string, unknown> = {
+                _line_number: i,
+                _path: path,
+              };
+              for (let j = 0; j < sanitized.length; j++) {
+                row[sanitized[j]] = null;
+              }
+              if (includeRaw) row._raw = line;
+              yield row;
+              continue;
+            }
+            const obj = parsed as Record<string, unknown>;
+            const row: Record<string, unknown> = {
+              _line_number: i,
+              _path: path,
+            };
+            for (let j = 0; j < rawKeys.length; j++) {
+              const rk = rawKeys[j];
+              const v = obj[rk];
+              if (v === undefined) {
+                row[sanitized[j]] = null;
+              } else if (v !== null && typeof v === 'object') {
+                row[sanitized[j]] = JSON.stringify(v);
+              } else {
+                row[sanitized[j]] = v as string | number | boolean | null;
+              }
+            }
+            if (includeRaw) row._raw = null;
+            yield row;
+          } catch (e) {
+            if (opts.strict) {
+              throw new Error(
+                `agt0 fs: jsonl_expand: invalid JSON at ${path}:${i}: ${e instanceof Error ? e.message : String(e)}`,
+              );
+            }
+            const row: Record<string, unknown> = {
+              _line_number: i,
+              _path: path,
+            };
+            for (let j = 0; j < sanitized.length; j++) {
+              row[sanitized[j]] = null;
+            }
+            if (includeRaw) row._raw = line;
+            yield row;
+          }
+        }
+      },
+    };
+  }
+
+  // Virtual table modules: dynamic columns from file schema (single path only; no globs).
+  // Runtime supports `db.table(name, factory)`; @types/better-sqlite3 only lists the object form.
+  const dbTable = db as unknown as {
+    table(name: string, def: object | ((...args: unknown[]) => object)): void;
+  };
+
+  dbTable.table('csv_expand', function csvExpandFactory(
+    pathArg: unknown,
+    optionsArg?: unknown,
+  ) {
+    return delimitedExpandDefinition(pathArg, optionsArg, null, 'csv_expand');
+  });
+
+  dbTable.table('tsv_expand', function tsvExpandFactory(
+    pathArg: unknown,
+    optionsArg?: unknown,
+  ) {
+    return delimitedExpandDefinition(pathArg, optionsArg, '\t', 'tsv_expand');
+  });
+
+  dbTable.table('jsonl_expand', function jsonlExpandFactory(
+    pathArg: unknown,
+    optionsArg?: unknown,
+  ) {
+    return jsonlExpandDefinition(pathArg, optionsArg);
+  });
 
   // fs_list: directory listing
   db.table('fs_list', {

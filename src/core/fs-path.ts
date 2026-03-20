@@ -195,7 +195,14 @@ export function readFsPreviewBytes(): number {
 }
 
 /**
- * Max rows emitted per fs_csv / fs_tsv / fs_text / fs_jsonl scan (one SQL table reference).
+ * For `jsonl_expand`: max non-empty lines scanned at CREATE time to infer the union of object keys.
+ */
+export function readFsExpandJsonlScanLines(): number {
+  return envIntPositive('AGT0_FS_EXPAND_JSONL_SCAN_LINES', 256);
+}
+
+/**
+ * Max rows emitted per fs_csv / fs_tsv / fs_text / fs_jsonl / *_expand scan (one SQL table reference).
  * `null` = unlimited. Stops runaway scans (e.g. accidental full read in a tight loop).
  */
 export function readFsMaxRows(): number | null {
