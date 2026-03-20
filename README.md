@@ -175,6 +175,12 @@ Path patterns support `*`, `?`, and `**` globs. Optional `options` is a JSON str
     └── myapp-staging.db # Branches are copies
 ```
 
+## Publishing (maintainers)
+
+Publish from the **repository root** (not a nested `package/` folder). `prepublishOnly` runs `build` and `test` automatically.
+
+If npm prints `Unknown env config "devdir"`, remove the unsupported `devdir` entry from your `~/.npmrc` (or project `.npmrc`).
+
 ## License
 
 MIT
