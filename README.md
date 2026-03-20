@@ -52,6 +52,9 @@ fs:/> exit
 # Read that file from SQL
 agt0 sql myapp -q "SELECT json_extract(fs_read('/config.json'), '$.name')"
 # → agt0
+
+# Interactive SQL REPL (not the fs shell): .help for dot commands, .fshelp for fs_* SQL
+# agt0 sql myapp
 ```
 
 ## Core Concepts
@@ -125,7 +128,7 @@ agt0
 ├── list                                List all databases
 ├── delete <name> [--yes]               Delete a database
 ├── use [name] [--clear]                Set or show default database
-├── sql [db] [-q <sql>] [-f <file>]     Execute SQL (inline/file/REPL)
+├── sql [db] [-q <sql>] [-f <file>]     Execute SQL (inline/file/REPL; REPL: .help, .fshelp)
 ├── fs
 │   ├── ls <db>:/path                   List files
 │   ├── cat <db>:/path                  Read file content

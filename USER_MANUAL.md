@@ -37,7 +37,9 @@ agt0 sql myapp -f schema.sql
 agt0 sql myapp
 ```
 
-In the REPL, type SQL ending with `;` to execute. Dot commands are also available:
+**Dot commands** (`.help`, `.fshelp`, `.tables`, `.schema`, `.quit`) work **only** in the **SQL** REPL above — **not** in `agt0 fs sh` (the filesystem shell has different commands such as `help` / `exit`).
+
+In the SQL REPL, type SQL ending with `;` to execute. Example session:
 
 ```
 agt0:myapp> SELECT * FROM users;

@@ -156,6 +156,6 @@ Commands: `ls`, `cd`, `cat`, `echo <text> > <path>`, `mkdir`, `rm`, `pwd`, `exit
 - Each database is a single `.db` file. Copy it to back up.
 - The `_fs` table is the system table for the virtual filesystem. Do not drop it.
 - Glob patterns (`*`, `?`, `**`) work in `fs_text`, `fs_csv`, `fs_tsv`, `fs_jsonl` path parameters.
-- SQL REPL: `.fshelp` lists `fs_*` functions and options.
+- **SQL** REPL (`agt0 sql <db>` interactive): `.fshelp` lists `fs_*` functions and options. Not available in `agt0 fs sh` (use `help` there).
 - `fs_read_at` / `fs_write_at` use **byte** offsets; `fs_read_at` returns a UTF-8 string for that byte range (binary files may not round-trip through TEXT).
 - CSV columns are returned as a JSON string in the `_data` column. Use `json_extract(_data, '$.column_name')` to access individual fields.

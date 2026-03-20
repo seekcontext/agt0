@@ -37,6 +37,20 @@ afterAll(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
+describe('SQL REPL dot commands', () => {
+  it('.fshelp prints virtual FS SQL help (SQL REPL only, not fs sh)', () => {
+    agt0(['init', 'replhelp']);
+    const r = spawnSync(process.execPath, [cli, 'sql', 'replhelp'], {
+      encoding: 'utf-8',
+      env: { ...process.env, AGT0_HOME: home },
+      input: '.fshelp\n.quit\n',
+    });
+    expect(r.status, r.stderr || r.stdout).toBe(0);
+    expect(r.stdout).toMatch(/Scalar functions/);
+    expect(r.stdout).toMatch(/fs_read/);
+  });
+});
+
 describe('README Quick Start + SQL fusion', () => {
   it('init, put CSV, query fs_csv, config json', () => {
     agt0(['init', 'myapp']);
