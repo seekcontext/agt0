@@ -1,6 +1,6 @@
 {
   "name": "@seekcontext/agt0",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "One file. All your agent needs. Local-first storage for AI agents — database, filesystem, and memory in a single SQLite file.",
   "type": "module",
   "bin": {
@@ -21,7 +21,8 @@
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "prepublishOnly": "npm run build && npm test"
+    "ci": "npm run typecheck && npm run build && npm test",
+    "prepublishOnly": "npm run ci"
   },
   "keywords": [
     "sqlite",

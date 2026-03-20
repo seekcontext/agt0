@@ -137,6 +137,10 @@ SELECT fs_append('/logs/app.log', 'Started at ' || datetime('now') || char(10));
 -- Truncate a log file (e.g. rotate)
 SELECT fs_truncate('/logs/app.log', 0);
 
+-- Random access (byte offsets; read returns UTF-8 text for that byte range)
+SELECT fs_read_at('/data/note.txt', 10, 32);
+SELECT fs_write_at('/data/patch.bin', 64, 'Hi');  -- pads with NUL bytes if offset extends past current EOF
+
 -- Check existence and size
 SELECT fs_exists('/config/app.json'), fs_size('/config/app.json');
 -- → 1, 34

@@ -112,7 +112,7 @@ function printFsSqlHelp(): void {
   console.log(chalk.bold('Scalar functions'));
   console.log(
     chalk.dim(
-      '  fs_read fs_write fs_append fs_truncate fs_exists fs_size fs_mtime fs_remove fs_mkdir',
+      '  fs_read fs_read_at fs_write fs_write_at fs_append fs_truncate fs_exists fs_size fs_mtime fs_remove fs_mkdir',
     ),
   );
   console.log();

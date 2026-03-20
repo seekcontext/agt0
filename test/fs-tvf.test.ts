@@ -134,6 +134,34 @@ describe('fs TVF and scalars', () => {
     }
   });
 
+  it('fs_read_at and fs_write_at', async () => {
+    const { createDatabase, openDatabase, deleteDatabase } = await import(
+      '../src/core/database.js'
+    );
+    const { fsWrite, fsRead } = await import('../src/core/virtual-fs.js');
+    const name = uniqName();
+    createDatabase(name);
+    const db = openDatabase(name);
+    try {
+      fsWrite(db, '/rw.bin', Buffer.from('hello'));
+      fsWrite(db, '/gap.bin', Buffer.from('ab'));
+      const mid = db
+        .prepare(`SELECT fs_read_at('/rw.bin', 1, 3) AS s`)
+        .get() as { s: string };
+      expect(mid.s).toBe('ell');
+      db.prepare(`SELECT fs_write_at('/rw.bin', 5, 'xx')`).pluck().get();
+      const buf = fsRead(db, '/rw.bin');
+      expect(buf?.length).toBe(7);
+      expect(buf?.toString('utf-8')).toBe('helloxx');
+      db.prepare(`SELECT fs_write_at('/gap.bin', 4, 'Z')`).pluck().get();
+      const g = fsRead(db, '/gap.bin');
+      expect(g?.equals(Buffer.from('ab\0\0Z', 'binary'))).toBe(true);
+    } finally {
+      db.close();
+      deleteDatabase(name);
+    }
+  });
+
   it('fs_truncate shortens file', async () => {
     const { createDatabase, openDatabase, deleteDatabase } = await import(
       '../src/core/database.js'

@@ -152,6 +152,8 @@ agt0
 | `fs_remove(path, recursive)` | INTEGER | Delete, returns count |
 | `fs_mkdir(path, recursive)` | INTEGER | Create directory |
 | `fs_truncate(path, size)` | INTEGER | Truncate file to size in bytes |
+| `fs_read_at(path, offset, length)` | TEXT | Read UTF-8 slice (bytes); short read at EOF |
+| `fs_write_at(path, offset, data)` | INTEGER | Overwrite/patch at byte offset; extends with zeros |
 
 ### Table-Valued Functions
 
@@ -177,7 +179,7 @@ Path patterns support `*`, `?`, and `**` globs. Optional `options` is a JSON str
 
 ## Publishing (maintainers)
 
-Publish from the **repository root** (not a nested `package/` folder). `prepublishOnly` runs `build` and `test` automatically.
+Publish from the **repository root** (not a nested `package/` folder). `prepublishOnly` runs **`npm run ci`** (`typecheck`, `build`, `test`). Locally: `npm run ci` before pushing.
 
 If npm prints `Unknown env config "devdir"`, remove the unsupported `devdir` entry from your `~/.npmrc` (or project `.npmrc`).
 

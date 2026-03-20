@@ -6,6 +6,14 @@ function now(): string {
   return new Date().toISOString().replace('Z', '').slice(0, -3) + 'Z';
 }
 
+/** Non-negative byte index from SQL (number or bigint). */
+function asNonNegByteIndex(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === 'bigint' ? Number(v) : Number(v);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.floor(n);
+}
+
 /**
  * Register fs_* scalar functions.
  *
@@ -161,6 +169,42 @@ export function registerScalarFunctions(db: DatabaseType): void {
     ensureParentDirs(path);
     stmtUpsertFile.run(path, out, out.length, ts, ts);
     return out.length;
+  });
+
+  db.function('fs_read_at', (path: unknown, offset: unknown, length: unknown) => {
+    if (typeof path !== 'string') return null;
+    const off = asNonNegByteIndex(offset);
+    const len = asNonNegByteIndex(length);
+    if (off === null || len === null) return null;
+    const row = stmtReadFile.get(path, 'file') as
+      | { content: Buffer | null }
+      | undefined;
+    if (!row || row.content === null) return null;
+    const buf = row.content;
+    if (len === 0) return '';
+    if (off >= buf.length) return '';
+    const end = Math.min(off + len, buf.length);
+    return buf.subarray(off, end).toString('utf-8');
+  });
+
+  db.function('fs_write_at', (path: unknown, offset: unknown, data: unknown) => {
+    if (typeof path !== 'string') return null;
+    if (data === null || data === undefined) return null;
+    const off = asNonNegByteIndex(offset);
+    if (off === null) return null;
+    const chunk = Buffer.from(String(data), 'utf-8');
+    const existing = stmtReadFile.get(path, 'file') as
+      | { content: Buffer | null }
+      | undefined;
+    const oldData = existing?.content ?? Buffer.alloc(0);
+    const newLen = Math.max(oldData.length, off + chunk.length);
+    const out = Buffer.alloc(newLen, 0);
+    oldData.copy(out, 0, 0, oldData.length);
+    chunk.copy(out, off, 0, chunk.length);
+    const ts = now();
+    ensureParentDirs(path);
+    stmtUpsertFile.run(path, out, out.length, ts, ts);
+    return chunk.length;
   });
 }
 

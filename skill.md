@@ -65,6 +65,8 @@ SELECT fs_mtime('/config.json');                            -- Last modified ISO
 SELECT fs_remove('/tmp/scratch.txt');                       -- Delete file
 SELECT fs_mkdir('/data/exports', 1);                        -- Create dir (1=recursive)
 SELECT fs_truncate('/logs/app.log', 0);                     -- Truncate to size (bytes)
+SELECT fs_read_at('/data/blob.bin', 0, 16);                   -- Read 16 bytes from offset (UTF-8 text)
+SELECT fs_write_at('/data/blob.bin', 100, 'patch');          -- Write at byte offset (pads with zeros)
 ```
 
 ### SQL Functions (Table-Valued)
@@ -155,4 +157,5 @@ Commands: `ls`, `cd`, `cat`, `echo <text> > <path>`, `mkdir`, `rm`, `pwd`, `exit
 - The `_fs` table is the system table for the virtual filesystem. Do not drop it.
 - Glob patterns (`*`, `?`, `**`) work in `fs_text`, `fs_csv`, `fs_tsv`, `fs_jsonl` path parameters.
 - SQL REPL: `.fshelp` lists `fs_*` functions and options.
+- `fs_read_at` / `fs_write_at` use **byte** offsets; `fs_read_at` returns a UTF-8 string for that byte range (binary files may not round-trip through TEXT).
 - CSV columns are returned as a JSON string in the `_data` column. Use `json_extract(_data, '$.column_name')` to access individual fields.
