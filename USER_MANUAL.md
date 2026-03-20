@@ -30,7 +30,7 @@ agt0 sql myapp -q "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email 
 agt0 sql myapp -q "INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')"
 agt0 sql myapp -q "SELECT * FROM users"
 
-# From a file
+# From a file (create schema.sql first, or use your migration file)
 agt0 sql myapp -f schema.sql
 
 # Interactive REPL
@@ -138,12 +138,13 @@ SELECT fs_append('/logs/app.log', 'Started at ' || datetime('now') || char(10));
 SELECT fs_truncate('/logs/app.log', 0);
 
 -- Random access (byte offsets; read returns UTF-8 text for that byte range)
+SELECT fs_write('/data/note.txt', '0123456789012345678901234567890123456789');  -- create file first
 SELECT fs_read_at('/data/note.txt', 10, 32);
 SELECT fs_write_at('/data/patch.bin', 64, 'Hi');  -- pads with NUL bytes if offset extends past current EOF
 
--- Check existence and size
+-- Check existence and size (size is UTF-8 byte length of the file)
 SELECT fs_exists('/config/app.json'), fs_size('/config/app.json');
--- → 1, 34
+-- → 1, 29   -- for the JSON above: {"debug": true, "port": 3000}
 ```
 
 ### Query CSV Files as Tables
@@ -206,12 +207,12 @@ ORDER BY error_count DESC;
 
 ```sql
 -- List all files and directories
-SELECT path, type, size, mtime
+SELECT path, type, size, mode, mtime
 FROM fs_list('/')
 ORDER BY mtime DESC;
 
 -- Find large files
-SELECT path, size, mtime
+SELECT path, type, size, mtime
 FROM fs_list('/data/')
 WHERE size > 1000000;
 ```
@@ -271,6 +272,7 @@ agt0 dump myapp
 ### Import SQL
 
 ```bash
+# Runs the SQL file against the database (file must exist)
 agt0 seed myapp schema.sql
 ```
 
@@ -297,13 +299,15 @@ Branches are full copies of the SQLite file. Changes to a branch don't affect th
 
 ### Recipe 1: Project Context for a Coding Agent
 
+Requires a local `./src` tree. Use `**` so nested `.ts` files match (single `*` only matches one path segment).
+
 ```bash
 agt0 init project-context
 agt0 fs put -r ./src project-context:/src
 agt0 fs put ./package.json project-context:/package.json
 agt0 sql project-context -q "
   SELECT _path, COUNT(*) as lines
-  FROM fs_text('/src/*.ts')
+  FROM fs_text('/src/**/*.ts')
   GROUP BY _path
   ORDER BY lines DESC"
 ```
@@ -327,6 +331,10 @@ agt0 sql logs-db -q "
 
 ```bash
 agt0 init config
+# One line (avoids shell newline/quoting issues):
+agt0 sql config -q "SELECT fs_write('/env/production.json', '{\"database_url\":\"postgres://...\",\"redis_url\":\"redis://...\",\"debug\":false}')"
+
+# Or multi-line JSON inside single-quoted SQL (bash keeps newlines inside double quotes):
 agt0 sql config -q "SELECT fs_write('/env/production.json', '{
   \"database_url\": \"postgres://...\",
   \"redis_url\": \"redis://...\",

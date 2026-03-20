@@ -35,6 +35,9 @@ npm install -g @seekcontext/agt0
 # Create a database
 agt0 init myapp
 
+# Sample CSV on disk (or use your own file)
+printf 'name,email,role\nAlice,a@ex.com,admin\nBob,b@ex.com,user\n' > ./users.csv
+
 # Write a file into the virtual filesystem
 agt0 fs put ./users.csv myapp:/data/users.csv
 
@@ -77,7 +80,7 @@ FROM fs_jsonl('/logs/app.jsonl')
 WHERE json_extract(line, '$.level') = 'error';
 
 -- List files
-SELECT path, size, mtime FROM fs_list('/data/');
+SELECT path, type, size, mtime FROM fs_list('/data/');
 
 -- Query text files with line numbers
 SELECT * FROM fs_text('/logs/*.log') WHERE line LIKE '%error%';
@@ -179,7 +182,7 @@ Path patterns support `*`, `?`, and `**` globs. Optional `options` is a JSON str
 
 ## Publishing (maintainers)
 
-Publish from the **repository root** (not a nested `package/` folder). `prepublishOnly` runs **`npm run ci`** (`typecheck`, `build`, `test`). Locally: `npm run ci` before pushing.
+Publish from the **repository root** (not a nested `package/` folder). `prepublishOnly` runs **`npm run ci`** (`typecheck`, `build`, `test`). Locally: `npm run ci` before pushing. Doc examples are smoke-tested in `test/docs-examples.e2e.test.ts` (isolated `AGT0_HOME`).
 
 If npm prints `Unknown env config "devdir"`, remove the unsupported `devdir` entry from your `~/.npmrc` (or project `.npmrc`).
 

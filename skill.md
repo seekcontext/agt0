@@ -30,7 +30,7 @@ agt0 use myapp
 # Inline
 agt0 sql myapp -q "SELECT 1 + 1 AS result"
 
-# From file
+# From file (must exist on disk)
 agt0 sql myapp -f schema.sql
 
 # Interactive REPL (when no -q or -f)
@@ -75,7 +75,7 @@ Optional second argument on `fs_text`, `fs_csv`, `fs_tsv`, `fs_jsonl`: a JSON st
 
 ```sql
 -- List directory
-SELECT path, type, size, mtime FROM fs_list('/data/');
+SELECT path, type, size, mode, mtime FROM fs_list('/data/');
 
 -- Read text file by lines (globs: *, ?, **)
 SELECT _line_number, line, _path FROM fs_text('/logs/app.log');
