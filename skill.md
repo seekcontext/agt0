@@ -5,7 +5,7 @@ Local-first storage for AI agents. Database, filesystem, and memory in a single 
 ## Install
 
 ```bash
-npm install -g agt0
+npm install -g @seekcontext/agt0
 ```
 
 Verify:

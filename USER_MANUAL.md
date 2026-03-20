@@ -3,7 +3,7 @@
 ## Installation
 
 ```bash
-npm install -g agt0
+npm install -g @seekcontext/agt0
 ```
 
 Requires Node.js 20 or later. Verify:
@@ -363,7 +363,7 @@ agt0 sql pipeline -q "
 agt0 can be imported as an npm module:
 
 ```typescript
-import { createDatabase, openDatabase, fsWrite, fsRead, fsList } from 'agt0';
+import { createDatabase, openDatabase, fsWrite, fsRead, fsList } from '@seekcontext/agt0';
 
 // Create a new database
 const db = createDatabase('my-agent');

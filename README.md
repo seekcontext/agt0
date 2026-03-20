@@ -30,7 +30,7 @@ AI agents need to store structured data (tables, records), unstructured data (fi
 ## Quick Start
 
 ```bash
-npm install -g agt0
+npm install -g @seekcontext/agt0
 
 # Create a database
 agt0 init myapp
@@ -106,7 +106,7 @@ Tell your agent:
 Or use agt0 as an npm library:
 
 ```typescript
-import { openDatabase, fsWrite, fsRead } from 'agt0';
+import { openDatabase, fsWrite, fsRead } from '@seekcontext/agt0';
 
 const db = openDatabase('my-agent');
 fsWrite(db, '/memory/context.md', Buffer.from('User prefers dark mode'));
