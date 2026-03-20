@@ -68,7 +68,9 @@ function startRepl(db: ReturnType<typeof openDatabase>, name: string): void {
   });
 
   console.log(
-    chalk.dim(`Connected to '${name}'. Type .help for commands, .quit to exit.`),
+    chalk.dim(
+      `Connected to '${name}'. Type .help for commands, .fshelp for fs_* SQL, .quit to exit.`,
+    ),
   );
   console.log();
 
@@ -104,6 +106,43 @@ function startRepl(db: ReturnType<typeof openDatabase>, name: string): void {
     db.close();
     console.log();
   });
+}
+
+function printFsSqlHelp(): void {
+  console.log(chalk.bold('Scalar functions'));
+  console.log(
+    chalk.dim(
+      '  fs_read fs_write fs_append fs_truncate fs_exists fs_size fs_mtime fs_remove fs_mkdir',
+    ),
+  );
+  console.log();
+  console.log(chalk.bold('Table-valued functions'));
+  console.log(
+    chalk.dim(
+      '  fs_list(dir)  fs_text(pattern[, options])  fs_csv(pattern[, options])  fs_tsv(pattern[, options])  fs_jsonl(pattern[, options])',
+    ),
+  );
+  console.log();
+  console.log(chalk.bold('Glob rules'));
+  console.log(
+    chalk.dim(
+      '  * = one path segment; ** = any depth; ? = one char (no slash). Example: /data/**/*.csv',
+    ),
+  );
+  console.log();
+  console.log(chalk.bold('options (2nd arg JSON string)'));
+  console.log(
+    chalk.dim(
+      '  exclude: comma globs | strict: bool | delimiter: string | header: bool',
+    ),
+  );
+  console.log();
+  console.log(chalk.bold('Limits (env)'));
+  console.log(
+    chalk.dim(
+      '  AGT0_FS_MAX_FILES  AGT0_FS_MAX_FILE_BYTES  AGT0_FS_MAX_TOTAL_BYTES',
+    ),
+  );
 }
 
 function handleDotCommand(
@@ -146,8 +185,12 @@ function handleDotCommand(
       console.log(chalk.dim('Commands:'));
       console.log('  .tables    List all tables');
       console.log('  .schema    Show CREATE statements');
+      console.log('  .fshelp    Virtual filesystem SQL functions');
       console.log('  .quit      Exit the REPL');
       console.log('  .help      Show this help');
+      break;
+    case '.fshelp':
+      printFsSqlHelp();
       break;
     default:
       printError(`Unknown command: ${cmd}`);

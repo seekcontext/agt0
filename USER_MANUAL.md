@@ -43,6 +43,7 @@ In the REPL, type SQL ending with `;` to execute. Dot commands are also availabl
 agt0:myapp> SELECT * FROM users;
 agt0:myapp> .tables
 agt0:myapp> .schema
+agt0:myapp> .fshelp
 agt0:myapp> .help
 agt0:myapp> .quit
 ```
@@ -133,6 +134,9 @@ SELECT json_extract(fs_read('/config/app.json'), '$.port');
 -- Append to a log
 SELECT fs_append('/logs/app.log', 'Started at ' || datetime('now') || char(10));
 
+-- Truncate a log file (e.g. rotate)
+SELECT fs_truncate('/logs/app.log', 0);
+
 -- Check existence and size
 SELECT fs_exists('/config/app.json'), fs_size('/config/app.json');
 -- → 1, 34
@@ -170,6 +174,13 @@ WHERE json_extract(line, '$.level') = 'error'
 ORDER BY _line_number DESC
 LIMIT 10;
 ```
+
+### Glob patterns and options
+
+- `*` matches one path segment (no `/`). `**` matches at any depth. `?` matches one character (not `/`).
+- Example: `SELECT * FROM fs_csv('/imports/**/*.csv')` merges all matching CSVs; column names are the **union** of headers across files (missing values appear as JSON `null` in `_data`).
+- Optional second argument (JSON string): `exclude` (comma-separated globs; relative patterns apply as `**/name`), `strict` (fail on bad CSV/JSONL rows), `delimiter` and `header` for delimiter-separated files.
+- Safety: set `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES` to cap matches. Override install location with `AGT0_HOME`.
 
 ### Query Text Files with Grep-like Power
 

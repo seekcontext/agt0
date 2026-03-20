@@ -12,3 +12,14 @@ export {
   resolveDbName,
 } from './core/config.js';
 export type { Agt0Config } from './core/config.js';
+export {
+  normalizeVirtualPath,
+  normalizeGlobPattern,
+  globToRegExp,
+  readFsLimits,
+  parseFsTableOptions,
+  isGlobPattern,
+  sqlLikeLiteralPrefix,
+  toAbsoluteExcludeGlob,
+} from './core/fs-path.js';
+export type { FsTableOptions, FsReadLimits } from './core/fs-path.js';

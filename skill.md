@@ -64,23 +64,34 @@ SELECT fs_size('/config.json');                             -- Size in bytes
 SELECT fs_mtime('/config.json');                            -- Last modified ISO 8601
 SELECT fs_remove('/tmp/scratch.txt');                       -- Delete file
 SELECT fs_mkdir('/data/exports', 1);                        -- Create dir (1=recursive)
+SELECT fs_truncate('/logs/app.log', 0);                     -- Truncate to size (bytes)
 ```
 
 ### SQL Functions (Table-Valued)
+
+Optional second argument on `fs_text`, `fs_csv`, `fs_tsv`, `fs_jsonl`: a JSON string with `exclude` (comma-separated globs), `strict` (bool), `delimiter` (string), `header` (bool). Relative exclude globs are rooted as `**/pattern`.
 
 ```sql
 -- List directory
 SELECT path, type, size, mtime FROM fs_list('/data/');
 
--- Read text file by lines (supports glob: /logs/*.log)
+-- Read text file by lines (globs: *, ?, **)
 SELECT _line_number, line, _path FROM fs_text('/logs/app.log');
+SELECT _line_number, line, _path FROM fs_text('/logs/**/*.log', '{"exclude":"*.tmp,*.bak"}');
 
--- Read CSV as table (auto-parses headers, _data is JSON object per row)
+-- Read CSV (_data is JSON per row; multi-file globs use union of column names)
 SELECT _line_number, _data, _path FROM fs_csv('/data/users.csv');
+
+-- TSV (tab-separated)
+SELECT _line_number, _data, _path FROM fs_tsv('/data/report.tsv');
 
 -- Read JSONL (each line is JSON)
 SELECT _line_number, line, _path FROM fs_jsonl('/logs/events.jsonl');
 ```
+
+**Glob rules:** `*` = one path segment (no slash); `**` = any depth; `?` = one character (not slash). Example: `/data/**/*.csv`.
+
+**Limits (override via env):** `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`.
 
 ### Key Pattern: File → SQL Query
 
@@ -142,5 +153,6 @@ Commands: `ls`, `cd`, `cat`, `echo <text> > <path>`, `mkdir`, `rm`, `pwd`, `exit
 - All data is local. No network required.
 - Each database is a single `.db` file. Copy it to back up.
 - The `_fs` table is the system table for the virtual filesystem. Do not drop it.
-- Glob patterns (`*`, `?`) work in `fs_text`, `fs_csv`, `fs_jsonl` path parameters.
+- Glob patterns (`*`, `?`, `**`) work in `fs_text`, `fs_csv`, `fs_tsv`, `fs_jsonl` path parameters.
+- SQL REPL: `.fshelp` lists `fs_*` functions and options.
 - CSV columns are returned as a JSON string in the `_data` column. Use `json_extract(_data, '$.column_name')` to access individual fields.

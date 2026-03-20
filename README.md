@@ -151,17 +151,19 @@ agt0
 | `fs_mtime(path)` | TEXT | Last modified (ISO 8601) |
 | `fs_remove(path, recursive)` | INTEGER | Delete, returns count |
 | `fs_mkdir(path, recursive)` | INTEGER | Create directory |
+| `fs_truncate(path, size)` | INTEGER | Truncate file to size in bytes |
 
 ### Table-Valued Functions
 
 | Function | Columns | Description |
 |---|---|---|
 | `fs_list(dir_path)` | path, type, size, mode, mtime | Directory listing |
-| `fs_text(path_pattern)` | _line_number, line, _path | Read text files by line |
-| `fs_csv(path_pattern)` | _line_number, _path, _data | Read CSV (parsed as JSON) |
-| `fs_jsonl(path_pattern)` | _line_number, line, _path | Read JSONL files |
+| `fs_text(path_pattern [, options])` | _line_number, line, _path | Read text files by line |
+| `fs_csv(path_pattern [, options])` | _line_number, _path, _data | Read CSV (parsed as JSON) |
+| `fs_tsv(path_pattern [, options])` | _line_number, _path, _data | Read TSV |
+| `fs_jsonl(path_pattern [, options])` | _line_number, line, _path | Read JSONL files |
 
-Path patterns support `*` and `?` glob matching for multi-file queries.
+Path patterns support `*`, `?`, and `**` globs. Optional `options` is a JSON string: `exclude`, `strict`, `delimiter`, `header`. Enforce limits with `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`.
 
 ## Data Storage
 

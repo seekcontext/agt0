@@ -2,7 +2,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 
 import { homedir } from 'os';
 import { join } from 'path';
 
-export const AGT0_HOME = join(homedir(), '.agt0');
+/** Override with `AGT0_HOME` for tests or custom data directory. */
+export const AGT0_HOME =
+  process.env.AGT0_HOME && process.env.AGT0_HOME.length > 0
+    ? process.env.AGT0_HOME
+    : join(homedir(), '.agt0');
 export const DATABASES_DIR = join(AGT0_HOME, 'databases');
 export const CONFIG_FILE = join(AGT0_HOME, 'config.json');
 

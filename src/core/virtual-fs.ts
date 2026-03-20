@@ -135,6 +135,33 @@ export function registerScalarFunctions(db: DatabaseType): void {
     }
     return 1;
   });
+
+  db.function('fs_truncate', (path: unknown, size: unknown) => {
+    if (typeof path !== 'string') return null;
+    const n =
+      typeof size === 'number'
+        ? size
+        : size === null || size === undefined
+          ? NaN
+          : Number(size);
+    if (!Number.isFinite(n) || n < 0) return null;
+    const target = Math.floor(n);
+    const existing = stmtReadFile.get(path, 'file') as
+      | { content: Buffer | null }
+      | undefined;
+    const oldData = existing?.content ?? Buffer.alloc(0);
+    let out: Buffer;
+    if (target <= oldData.length) {
+      out = oldData.subarray(0, target);
+    } else {
+      out = Buffer.alloc(target);
+      oldData.copy(out, 0, 0, oldData.length);
+    }
+    const ts = now();
+    ensureParentDirs(path);
+    stmtUpsertFile.run(path, out, out.length, ts, ts);
+    return out.length;
+  });
 }
 
 // ── Programmatic API (used by CLI commands, not inside SQL functions) ──
