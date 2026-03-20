@@ -1,5 +1,15 @@
 import chalk from 'chalk';
 
+/** Max width per column when printing to a TTY; split terminal width across columns. */
+function ttyColumnWidthCap(columnCount: number): number | undefined {
+  if (!process.stdout.isTTY) return undefined;
+  const tw = process.stdout.columns;
+  if (!tw || tw < 24) return 72;
+  const gutter = 2 * Math.max(0, columnCount - 1);
+  const usable = tw - gutter;
+  return Math.max(8, Math.floor(usable / columnCount));
+}
+
 export function printTable(
   rows: Record<string, unknown>[],
   columns?: string[],
@@ -10,12 +20,15 @@ export function printTable(
   }
 
   const cols = columns ?? Object.keys(rows[0]);
+  const cap = ttyColumnWidthCap(cols.length);
   const widths = cols.map((col) => {
     const maxVal = rows.reduce((max, row) => {
       const val = formatCell(row[col]);
       return Math.max(max, val.length);
     }, col.length);
-    return Math.min(maxVal, 60);
+    if (cap === undefined) return maxVal;
+    // Fit terminal, but never truncate the column header label.
+    return Math.max(Math.min(maxVal, cap), col.length);
   });
 
   // Header
