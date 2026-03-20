@@ -58,7 +58,6 @@ npm install -g @seekcontext/agt0
 agt0 init myapp
 
 # Upload a CSV and query it instantly — no import step
-printf 'name,email,role\nAlice,a@ex.com,admin\nBob,b@ex.com,user\n' > ./users.csv
 agt0 fs put ./users.csv myapp:/data/users.csv
 agt0 sql myapp -q "SELECT * FROM fs_csv('/data/users.csv')"
 
