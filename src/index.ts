@@ -23,3 +23,8 @@ export {
   toAbsoluteExcludeGlob,
 } from './core/fs-path.js';
 export type { FsTableOptions, FsReadLimits } from './core/fs-path.js';
+export {
+  expandFsTableSql,
+  isSqlFsExpandEnabled,
+} from './core/sql-fs-expand.js';
+export type { FsTableExpandName } from './core/sql-fs-expand.js';

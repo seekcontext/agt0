@@ -250,6 +250,10 @@ SELECT level, msg FROM events WHERE level = 'error';
 - **`jsonl_expand`** infers columns from the union of object keys in the first *N* non-empty lines (`AGT0_FS_EXPAND_JSONL_SCAN_LINES`, default `256`). Nested JSON values are returned as JSON text. With `strict: false`, an extra `_raw` column holds the original line when a row is not a valid JSON object (valid object rows have `_raw` SQL `NULL`).
 - **`csv_expand` / `tsv_expand`** accept the same JSON `options` as `fs_csv` / `fs_tsv` (2nd argument). If the file cannot be parsed as structured rows from the header preview, the table exposes `_line_number`, `_path`, and `_raw` (one line per row).
 
+### CLI sugar: auto-expanded `fs_csv` / `fs_tsv` / `fs_jsonl`
+
+The **`agt0 sql`** command (inline `-q`, `-f`, and REPL) rewrites **`fs_csv` / `fs_tsv` / `fs_jsonl`** calls when the first argument is a **single-quoted literal path with no globs** and the file exists: it wraps them in a subquery so **`SELECT *`** returns **real column names** (via `json_extract`), similar to hand-written `json_extract(_data, '$.col')` but automatic. **Glob patterns are not rewritten** (same as `csv_expand`). Set **`AGT0_SQL_FS_EXPAND=0`** to disable. The Node `openDatabase()` API does not apply this unless you call **`expandFsTableSql(sql, db)`** yourself (exported from `@seekcontext/agt0`).
+
 ## Data Storage
 
 ```

@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { createInterface } from 'readline';
 import { openDatabase } from '../core/database.js';
+import { expandFsTableSql } from '../core/sql-fs-expand.js';
 import { resolveDbName } from '../core/config.js';
 import { printTable, printSuccess, printError } from '../utils/format.js';
 import chalk from 'chalk';
@@ -47,10 +48,12 @@ function executeSql(db: ReturnType<typeof openDatabase>, sql: string): void {
         upper.startsWith('WITH') ||
         upper.startsWith('EXPLAIN')
       ) {
-        const rows = db.prepare(stmt).all() as Record<string, unknown>[];
+        const expanded = expandFsTableSql(stmt, db);
+        const rows = db.prepare(expanded).all() as Record<string, unknown>[];
         printTable(rows);
       } else {
-        const result = db.prepare(stmt).run();
+        const expanded = expandFsTableSql(stmt, db);
+        const result = db.prepare(expanded).run();
         printSuccess(`${result.changes} row(s) affected`);
       }
     } catch (err) {
@@ -163,6 +166,11 @@ function printFsSqlHelp(): void {
   console.log(
     chalk.dim(
       '  AGT0_FS_MAX_ROWS  AGT0_FS_PARSE_CHUNK_BYTES  AGT0_FS_PREVIEW_BYTES',
+    ),
+  );
+  console.log(
+    chalk.dim(
+      '  AGT0_SQL_FS_EXPAND  Auto-expand literal-path fs_csv/fs_tsv/fs_jsonl (0=off)',
     ),
   );
 }

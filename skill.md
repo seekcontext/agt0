@@ -92,6 +92,8 @@ SELECT level, msg FROM v_logs WHERE level = 'error';
 
 Schema is fixed at `CREATE` time; `DROP` and recreate if the file layout changes. JSONL columns = sorted union of object keys from the first `AGT0_FS_EXPAND_JSONL_SCAN_LINES` non-empty lines (default `256`). Optional 2nd arg: same JSON as TVFs (`strict`, `delimiter`, `header`, etc.).
 
+**`agt0 sql` (CLI only):** for a **literal single-file path** (no globs), `fs_csv` / `fs_tsv` / `fs_jsonl` are **auto-rewritten** so `SELECT *` returns real columns. Set `AGT0_SQL_FS_EXPAND=0` to disable. In Node, call `expandFsTableSql(sql, db)` from the package if you need the same rewrite.
+
 ### Import file data into tables
 
 ```sql
@@ -145,7 +147,7 @@ WHERE json_extract(_data, '$.email') IS NOT NULL;
 
 **Options** (JSON string, 2nd arg): `exclude` (comma-separated globs), `strict` (bool — fail on bad rows), `delimiter` (string), `header` (bool). (`exclude` is ignored by `*_expand` modules.)
 
-**Limits** (env vars): `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`, `AGT0_FS_MAX_ROWS` (optional cap per TVF / expand scan), `AGT0_FS_PARSE_CHUNK_BYTES`, `AGT0_FS_PREVIEW_BYTES` (multi-file CSV/TSV column discovery), `AGT0_FS_EXPAND_JSONL_SCAN_LINES` (JSONL key discovery for `jsonl_expand`).
+**Limits** (env vars): `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`, `AGT0_FS_MAX_ROWS` (optional cap per TVF / expand scan), `AGT0_FS_PARSE_CHUNK_BYTES`, `AGT0_FS_PREVIEW_BYTES` (multi-file CSV/TSV column discovery), `AGT0_FS_EXPAND_JSONL_SCAN_LINES` (JSONL key discovery for `jsonl_expand`), `AGT0_SQL_FS_EXPAND` (CLI rewrite of literal-path `fs_*` TVFs; default on).
 
 ---
 

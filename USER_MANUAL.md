@@ -301,6 +301,14 @@ Optional **2nd argument**: same JSON options string as the TVFs (`exclude` appli
 
 **Lifecycle:** the schema is fixed when you run `CREATE VIRTUAL TABLE`. If the file layout changes, run `DROP TABLE v_users` (or your name) and create it again.
 
+### CLI auto-expansion of `fs_csv` / `fs_tsv` / `fs_jsonl`
+
+When you use **`agt0 sql`** (`-q`, `-f`, or the interactive REPL), the CLI **rewrites** SQL before execution if it finds **`fs_csv('...')`**, **`fs_tsv('...')`**, or **`fs_jsonl('...')`** where the path is a **single SQL string literal** with **no `*` / `?` / `**` glob**, and the file exists in the virtual FS. The rewrite wraps the TVF in a subquery that projects each field with `json_extract`, so **`SELECT *`** behaves like a normal table with header (or JSONL) columns.
+
+- **Does not apply** to glob paths (use `csv_expand` or keep using `json_extract` on `_data` / `line`).
+- **Programmatic API:** opening the DB in Node does **not** rewrite SQL automatically; call **`expandFsTableSql(sql, db)`** from `@seekcontext/agt0` if you want the same behavior.
+- **Disable:** `AGT0_SQL_FS_EXPAND=0` (or `false` / `off` / `no`).
+
 ### Query JSONL log files
 
 ```sql
@@ -724,6 +732,7 @@ agt0 sql analytics -q "
 | `AGT0_FS_PARSE_CHUNK_BYTES` | Chunk size when incrementally parsing CSV/TSV (bytes) | `2MiB` |
 | `AGT0_FS_PREVIEW_BYTES` | Bytes read per file to discover CSV/TSV columns when a glob matches multiple files | `256KiB` |
 | `AGT0_FS_EXPAND_JSONL_SCAN_LINES` | For `jsonl_expand`, max non-empty lines scanned at `CREATE` time to infer column keys | `256` |
+| `AGT0_SQL_FS_EXPAND` | When non-zero (default), `agt0 sql` rewrites literal-path `fs_csv` / `fs_tsv` / `fs_jsonl` for flat columns | on |
 
 ---
 
