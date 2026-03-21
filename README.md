@@ -132,7 +132,7 @@ agt0 fs sh myapp                              # interactive shell
 
 Point any AI agent at the skill file:
 
-> Read https://agt0.dev/skill.md and follow instructions
+> Read https://raw.githubusercontent.com/seekcontext/agt0/main/skill.md and follow instructions
 
 ### Option 2: Node API
 
