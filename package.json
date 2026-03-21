@@ -50,7 +50,8 @@
     "dist",
     "skill.md",
     "README.md",
-    "USER_MANUAL.md"
+    "USER_MANUAL.md",
+    "LICENSE"
   ],
   "dependencies": {
     "better-sqlite3": "^12.8.0",

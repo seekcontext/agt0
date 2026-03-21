@@ -238,4 +238,4 @@ agt0 is inspired by [db9](https://db9.ai) — serverless Postgres for AI agents 
 
 ## License
 
-MIT
+[MIT](./LICENSE)
