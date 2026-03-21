@@ -12,13 +12,13 @@ Local-first storage for AI agents — database, filesystem, and memory in a sing
  ┌──────────────────────────────────────────────────────┐
  │                        agt0                           │
  │                                                       │
- │   Human ── CLI ──┐                                    │
- │                   ├──▶  SQL Engine + Virtual FS        │
- │   Agent ── API ──┘        │                           │
- │                      ┌────┴────┐                      │
- │                      │ SQLite  │  ← one .db file      │
- │                      │ tables + files + memory         │
- │                      └─────────┘                      │
+ │   Human ──── CLI ────┐                                │
+ │                      ├──▶  SQL Engine + Virtual FS    │
+ │   Agent ── SKILL.md ─┘        │                       │
+ │                          ┌────┴────┐                  │
+ │                          │ SQLite  │  ← one .db file  │
+ │                          │ tables + files + memory     │
+ │                          └─────────┘                  │
  └──────────────────────────────────────────────────────┘
 ```
 
@@ -212,6 +212,25 @@ Paths support globs (`*`, `**`, `?`). Options (JSON string): `exclude`, `strict`
 ```
 
 Override with `AGT0_HOME` env var. See [USER_MANUAL.md](./USER_MANUAL.md) for full reference.
+
+## Inspiration
+
+agt0 is inspired by [db9](https://db9.ai) — serverless Postgres for AI agents with built-in filesystem, vector search, and more.
+
+|  | agt0 | [db9](https://db9.ai) |
+|---|---|---|
+| Engine | SQLite (embedded, zero-dep) | PostgreSQL (cloud) |
+| Setup | `npm install -g` — done | Account registration + API key |
+| Deployment | Single `.db` file, copy anywhere | Cloud serverless |
+| Network | **None** — fully offline | Requires internet |
+| Latency | In-process, sub-ms | Network RTT (~100-200 ms) |
+| Privacy | Data never leaves your machine | Cloud-hosted |
+| Portability | One file = backup, share, version | Cloud lock-in |
+| Cost | **Free, forever** | Free tier + paid |
+| File queries | `fs_csv`, `fs_text`, `fs_jsonl` | `extensions.fs9()` |
+| Extras | — | Vector search, HTTP ext, pg_cron, FTS |
+
+**Choose agt0** when you want zero-setup, offline-first, single-file simplicity — ideal for local agents, CLI tools, and private data. **Choose db9** when you need cloud-native Postgres, multi-user access, or built-in extensions like vector search.
 
 ## Publishing (maintainers)
 
