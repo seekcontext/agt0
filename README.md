@@ -215,7 +215,7 @@ Override with `AGT0_HOME` env var. See [USER_MANUAL.md](./USER_MANUAL.md) for fu
 
 ## Publishing (maintainers)
 
-`prepublishOnly` runs typecheck → build → test. Doc examples are smoke-tested in `test/docs-examples.e2e.test.ts`.
+`prepublishOnly` runs typecheck → build → test. Doc examples are smoke-tested in `test/docs-examples.e2e.test.ts` (README, USER_MANUAL, skill.md CLI/SQL) and `test/docs-node-api-examples.test.ts` (Node API).
 
 ## License
 
