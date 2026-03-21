@@ -1,3 +1,8 @@
+---
+name: agt0
+description: Local-first agent storage — SQLite database, virtual filesystem, and memory in one .db file. Use when persisting agent state, querying CSV/JSONL/logs with SQL, or using fs_read/fs_write via the agt0 CLI or Node API.
+---
+
 # agt0 — Agent Storage Skill
 
 > **One file. All your agent needs.**
