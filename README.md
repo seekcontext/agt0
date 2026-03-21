@@ -9,43 +9,30 @@
 Local-first storage for AI agents — database, filesystem, and memory in a single SQLite file. Zero config. Zero network. Zero cost.
 
 ```
- ┌──────────────────────────────────────────────────────────┐
- │                        agt0                              │
- │                                                          │
- │   Human ──── CLI ────┐                                   │
- │                      ├──▶  SQL Engine + Virtual FS       │
- │   Agent ── SKILL.md ─┘        │                          │
- │                          ┌────┴────┐                     │
- │                          │ SQLite  │  ← one .db file     │
- │                          │ tables + files + memory       │
- │                          └─────────┘                     │
- └──────────────────────────────────────────────────────────┘
+ ┌──────────────────────────────────────────────────────┐
+ │                        agt0                           │
+ │                                                       │
+ │   Human ── CLI ──┐                                    │
+ │                   ├──▶  SQL Engine + Virtual FS        │
+ │   Agent ── API ──┘        │                           │
+ │                      ┌────┴────┐                      │
+ │                      │ SQLite  │  ← one .db file      │
+ │                      │ tables + files + memory         │
+ │                      └─────────┘                      │
+ └──────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Why agt0?
 
-AI agents need persistent storage — structured data (tables, records), unstructured data (files, logs, configs), and memory (context, preferences). Today these live in separate systems: a database here, a filesystem there, a vector store somewhere else.
-
-**agt0 collapses them into one SQLite file** with a single unified interface: **SQL**.
-
-| Problem | agt0 Solution |
+| Problem | agt0 |
 |---|---|
-| Agent state scattered across services | Everything in one `.db` file |
-| Need a database AND a filesystem | Virtual FS lives inside SQLite |
-| CSV/JSON import requires ETL scripts | `SELECT * FROM fs_csv('/data.csv')` — zero import |
-| Config across multiple env files | `fs_read('/env/prod.json')` from SQL |
+| Agent state scattered across services | One `.db` file |
+| Need a database AND a filesystem | Virtual FS inside SQLite |
+| CSV/JSON import needs ETL | `SELECT * FROM fs_csv('/data.csv')` |
 | Agent memory needs a separate store | Write to `/memory/`, query with SQL |
-| Sharing agent state is painful | Copy one file. Done. |
-
-### Built for agents
-
-Give any AI agent persistent, queryable storage in one line:
-
-> **Read https://agt0.dev/skill.md and follow instructions**
-
-That's it. The agent gets a full database + filesystem + memory layer. No API keys, no Docker, no infrastructure.
+| Sharing state is painful | Copy one file |
 
 ---
 
@@ -54,21 +41,11 @@ That's it. The agent gets a full database + filesystem + memory layer. No API ke
 ```bash
 npm install -g @seekcontext/agt0
 
-# Create a database — everything lives in this one file
 agt0 init myapp
-
-# Upload a CSV and query it instantly — no import step
 agt0 fs put ./users.csv myapp:/data/users.csv
 agt0 sql myapp -q "SELECT * FROM fs_csv('/data/users.csv')"
 
-# Write files from SQL
-agt0 sql myapp -q "SELECT fs_write('/config.json', '{\"mode\":\"production\"}')"
-
-# Read them back with JSON extraction
-agt0 sql myapp -q "SELECT json_extract(fs_read('/config.json'), '$.mode')"
-# → production
-
-# Interactive SQL REPL (.help for commands, .fshelp for fs_* functions)
+# Interactive SQL REPL
 agt0 sql myapp
 ```
 
@@ -76,107 +53,98 @@ agt0 sql myapp
 
 ## Core Concepts
 
-### One File = Everything
-
-Each database is a single `.db` file (`~/.agt0/databases/<name>.db`). Tables, files, agent memory — all in one place. Copy it, back it up, version it, share it.
-
 ### SQL + FS Fusion
 
-The killer feature: **query files with SQL, write files with SQL**. No import/export ceremony.
+Query files with SQL. Write files with SQL. No import ceremony.
 
 ```sql
--- Read and write files
-SELECT fs_read('/config.json');
-SELECT fs_write('/logs/today.log', 'Started at ' || datetime('now'));
+SELECT fs_write('/config.json', '{"port": 3000}');
+SELECT json_extract(fs_read('/config.json'), '$.port');
 
--- Query CSV as a table — no CREATE TABLE, no import
-SELECT json_extract(_data, '$.name') AS name,
-       json_extract(_data, '$.email') AS email
+-- CSV as table (rows in _data as JSON)
+SELECT json_extract(_data, '$.name') AS name
 FROM fs_csv('/data/users.csv')
 WHERE json_extract(_data, '$.role') = 'admin';
 
--- Grep across log files with SQL
+-- Grep text files
 SELECT _path, _line_number, line
 FROM fs_text('/logs/**/*.log')
 WHERE line LIKE '%ERROR%';
 
--- Query JSONL structured logs
-SELECT json_extract(line, '$.level') AS level, COUNT(*) AS count
+-- JSONL logs
+SELECT json_extract(line, '$.level') AS level, COUNT(*)
 FROM fs_jsonl('/logs/app.jsonl')
 GROUP BY level;
 
--- Bridge: import CSV into a proper table
+-- CSV → real table
 INSERT INTO users (name, email)
-SELECT DISTINCT json_extract(_data, '$.name'), json_extract(_data, '$.email')
+SELECT json_extract(_data, '$.name'), json_extract(_data, '$.email')
 FROM fs_csv('/data/import/users.csv');
-
--- Dynamic columns: one-time CREATE, then query like a normal table (single path only; no globs)
-CREATE VIRTUAL TABLE v_users USING csv_expand('/data/users.csv');
-SELECT name, email FROM v_users WHERE role = 'admin';
-
-CREATE VIRTUAL TABLE v_logs USING jsonl_expand('/logs/app.jsonl');
-SELECT level, msg FROM v_logs WHERE level = 'error';
 ```
+
+### CLI auto-expansion
+
+In `agt0 sql`, `fs_csv`/`fs_tsv`/`fs_jsonl` with a single file path are automatically expanded so `SELECT *` shows real column names:
+
+```
+agt0:myapp> SELECT * FROM fs_csv('/data/users.csv');
+name           email              role
+─────────────  ─────────────────  ─────
+Alice Johnson  alice@example.com  admin
+Bob Smith      bob@example.com    user
+```
+
+CSV/TSV values are **strings**. Use `CAST` for numeric comparison: `WHERE CAST(id AS INTEGER) > 5`.
+
+Disable with `AGT0_SQL_FS_EXPAND=0`. Node API: call `expandFsTableSql(sql, db)` explicitly.
+
+### Virtual table modules
+
+For repeated queries on a single file, create a virtual table:
+
+```sql
+CREATE VIRTUAL TABLE users USING csv_expand('/data/users.csv');
+SELECT name, email FROM users WHERE role = 'admin';
+
+CREATE VIRTUAL TABLE logs USING jsonl_expand('/logs/app.jsonl');
+SELECT level, COUNT(*) FROM logs GROUP BY level;
+```
+
+Modules: `csv_expand`, `tsv_expand`, `jsonl_expand`. Single path only (no globs). Schema is fixed at creation — `DROP` and recreate if the file changes.
 
 ### Virtual Filesystem
 
-A POSIX-like filesystem stored inside SQLite. Manage via CLI or SQL.
-
 ```bash
-agt0 fs put ./data.csv myapp:/data/data.csv    # Upload
-agt0 fs put -r ./src myapp:/src                # Upload directory tree
-agt0 fs get myapp:/data/data.csv ./local.csv   # Download
-agt0 fs ls myapp:/data/                        # List
-agt0 fs cat myapp:/config.json                 # Read
-agt0 fs rm myapp:/tmp/scratch.txt              # Delete
-agt0 fs sh myapp                               # Interactive shell
+agt0 fs put ./data.csv myapp:/data/data.csv   # upload
+agt0 fs put -r ./src myapp:/src               # upload tree
+agt0 fs get myapp:/data/data.csv ./out.csv    # download
+agt0 fs ls myapp:/data/                       # list
+agt0 fs cat myapp:/config.json                # read
+agt0 fs rm myapp:/tmp/scratch.txt             # delete
+agt0 fs sh myapp                              # interactive shell
 ```
 
 ---
 
 ## Agent Integration
 
-### Option 1: Skill instruction (recommended)
+### Option 1: Skill (recommended)
 
 Point any AI agent at the skill file:
 
 > Read https://agt0.dev/skill.md and follow instructions
 
-The agent will install agt0, create a database, and use it for persistent storage — all autonomously.
-
-### Option 2: Programmatic API
-
-Use agt0 as a Node.js library:
+### Option 2: Node API
 
 ```typescript
-import { createDatabase, openDatabase, fsWrite, fsRead, fsList } from '@seekcontext/agt0';
+import { createDatabase, openDatabase, fsWrite, fsRead } from '@seekcontext/agt0';
 
 const db = createDatabase('my-agent');
-
-// Store agent memory
-fsWrite(db, '/memory/preferences.json', Buffer.from(JSON.stringify({
-  theme: 'dark', language: 'en'
-})));
-
-// Read it back
-const prefs = JSON.parse(fsRead(db, '/memory/preferences.json')!.toString());
-
-// Use SQL for complex queries
+fsWrite(db, '/memory/prefs.json', Buffer.from('{"theme":"dark"}'));
+const prefs = JSON.parse(fsRead(db, '/memory/prefs.json')!.toString());
 const rows = db.prepare("SELECT * FROM fs_csv('/data/users.csv')").all();
-
 db.close();
 ```
-
-### Agent use cases
-
-| Use Case | How |
-|---|---|
-| **Persistent memory** | `fs_write('/memory/context.md', ...)` — survives across sessions |
-| **Project context** | `fs put -r ./src db:/src` then `SELECT * FROM fs_text('/src/**/*.ts')` |
-| **Task state** | Store progress in tables, query with SQL |
-| **Log analysis** | `fs_jsonl('/logs/*.jsonl')` with SQL aggregation |
-| **Config management** | JSON configs in virtual FS, query with `json_extract` |
-| **Data pipeline** | CSV → SQL table → JSON report, all in one file |
 
 ---
 
@@ -184,91 +152,70 @@ db.close();
 
 ```
 agt0
-├── init <name>                         Create a new database
-├── list                                List all databases
-├── delete <name> [--yes]               Delete a database
-├── use [name] [--clear]                Set or show default database
-├── sql [db] [-q <sql>] [-f <file>]     SQL execution (inline / file / REPL)
+├── init <name>                         Create database
+├── list                                List databases
+├── delete <name> [--yes]               Delete database
+├── use [name] [--clear]                Set/show default database
+├── sql [db] [-q <sql>] [-f <file>]     SQL (inline / file / REPL)
 ├── fs
-│   ├── ls <db>:/path                   List files
-│   ├── cat <db>:/path                  Read file content
-│   ├── put <local> <db>:/path [-r]     Upload file(s)
-│   ├── get <db>:/path <local>          Download file
-│   ├── rm <db>:/path [-r]             Remove file/dir
-│   ├── mkdir <db>:/path                Create directory
-│   └── sh [db]                         Interactive file shell
-├── inspect [db] [tables|schema]        Database overview
-├── dump [db] [-o file] [--ddl-only]    Export as SQL
-├── seed [db] <file>                    Run seed SQL file
+│   ├── ls <db>:/path                   List
+│   ├── cat <db>:/path                  Read
+│   ├── put <local> <db>:/path [-r]     Upload
+│   ├── get <db>:/path <local>          Download
+│   ├── rm <db>:/path [-r]             Delete
+│   ├── mkdir <db>:/path                Make directory
+│   └── sh [db]                         Interactive shell
+├── inspect [db] [tables|schema]        Database info
+├── dump [db] [-o file] [--ddl-only]    Export SQL
+├── seed [db] <file>                    Run SQL file
 └── branch <create|list|delete> [db]    Branch database
 ```
 
 ## SQL Functions
 
-### Scalar Functions
+### Scalar
 
 | Function | Returns | Description |
 |---|---|---|
-| `fs_read(path)` | TEXT | Read file content |
-| `fs_write(path, content)` | INTEGER | Write file, returns bytes written |
+| `fs_read(path)` | TEXT | Read file |
+| `fs_write(path, content)` | INTEGER | Write file (bytes written) |
 | `fs_append(path, data)` | INTEGER | Append to file |
-| `fs_exists(path)` | INTEGER | 1 if exists, 0 otherwise |
-| `fs_size(path)` | INTEGER | File size in bytes |
+| `fs_exists(path)` | INTEGER | 1 if exists |
+| `fs_size(path)` | INTEGER | File size (bytes) |
 | `fs_mtime(path)` | TEXT | Last modified (ISO 8601) |
-| `fs_remove(path, recursive)` | INTEGER | Delete, returns count |
-| `fs_mkdir(path, recursive)` | INTEGER | Create directory |
-| `fs_truncate(path, size)` | INTEGER | Truncate file to size in bytes |
-| `fs_read_at(path, offset, length)` | TEXT | Read UTF-8 slice at byte offset |
-| `fs_write_at(path, offset, data)` | INTEGER | Overwrite at byte offset; pads with zeros |
+| `fs_remove(path [, recursive])` | INTEGER | Delete |
+| `fs_mkdir(path [, recursive])` | INTEGER | Create directory |
+| `fs_truncate(path, size)` | INTEGER | Truncate to size |
+| `fs_read_at(path, offset, len)` | TEXT | Read byte range |
+| `fs_write_at(path, offset, data)` | INTEGER | Write at offset |
 
-### Table-Valued Functions
+### Table-Valued
 
 | Function | Columns | Description |
 |---|---|---|
-| `fs_list(dir_path)` | path, type, size, mode, mtime | Directory listing |
-| `fs_text(path [, options])` | _line_number, line, _path | Read text files by line |
-| `fs_csv(path [, options])` | _line_number, _path, _data | Read CSV (row as JSON) |
-| `fs_tsv(path [, options])` | _line_number, _path, _data | Read TSV |
-| `fs_jsonl(path [, options])` | _line_number, line, _path | Read JSONL files |
+| `fs_list(dir)` | path, type, size, mode, mtime | Directory listing |
+| `fs_text(path [, opts])` | _line_number, line, _path | Text lines |
+| `fs_csv(path [, opts])` | _line_number, _path, _data | CSV rows (JSON) |
+| `fs_tsv(path [, opts])` | _line_number, _path, _data | TSV rows (JSON) |
+| `fs_jsonl(path [, opts])` | _line_number, line, _path | JSONL lines |
 
-Path patterns support `*`, `?`, and `**` globs. Optional `options` is a JSON string with keys: `exclude`, `strict`, `delimiter`, `header`. Safety limits via `AGT0_FS_MAX_FILES`, `AGT0_FS_MAX_FILE_BYTES`, `AGT0_FS_MAX_TOTAL_BYTES`, `AGT0_FS_MAX_ROWS` (cap rows per TVF scan), `AGT0_FS_PARSE_CHUNK_BYTES` (CSV/TSV incremental parse chunk size), and `AGT0_FS_PREVIEW_BYTES` (per-file header preview when a glob matches multiple CSV/TSV files). Table-valued functions stream-parse delimited files so peak memory stays closer to one on-disk copy plus parser state, not a full parsed row array.
-
-### Virtual table modules (`csv_expand`, `tsv_expand`, `jsonl_expand`)
-
-For a **single virtual file path** (no globs), register a virtual table so CSV/TSV/JSONL fields appear as **real SQL columns** (no `json_extract` on `_data`).
-
-```sql
-CREATE VIRTUAL TABLE sales USING csv_expand('/data/report.csv');
-SELECT product, amount FROM sales WHERE CAST(amount AS REAL) > 100;
-
-CREATE VIRTUAL TABLE events USING jsonl_expand('/logs/events.jsonl', '{"strict": true}');
-SELECT level, msg FROM events WHERE level = 'error';
-```
-
-- **Globs are not supported** — use `fs_csv` / `fs_tsv` / `fs_jsonl` when you need `*` / `**`.
-- **Schema is fixed at `CREATE VIRTUAL TABLE` time** — if the file changes shape, `DROP` the virtual table and create it again.
-- **`jsonl_expand`** infers columns from the union of object keys in the first *N* non-empty lines (`AGT0_FS_EXPAND_JSONL_SCAN_LINES`, default `256`). Nested JSON values are returned as JSON text. With `strict: false`, an extra `_raw` column holds the original line when a row is not a valid JSON object (valid object rows have `_raw` SQL `NULL`).
-- **`csv_expand` / `tsv_expand`** accept the same JSON `options` as `fs_csv` / `fs_tsv` (2nd argument). If the file cannot be parsed as structured rows from the header preview, the table exposes `_line_number`, `_path`, and `_raw` (one line per row).
-
-### CLI sugar: auto-expanded `fs_csv` / `fs_tsv` / `fs_jsonl`
-
-The **`agt0 sql`** command (inline `-q`, `-f`, and REPL) rewrites **`fs_csv` / `fs_tsv` / `fs_jsonl`** calls when the first argument is a **single-quoted literal path with no globs** and the file exists: it wraps them in a subquery so **`SELECT *`** returns **real column names** (via `json_extract`), similar to hand-written `json_extract(_data, '$.col')` but automatic. **Glob patterns are not rewritten** (same as `csv_expand`). Set **`AGT0_SQL_FS_EXPAND=0`** to disable. The Node `openDatabase()` API does not apply this unless you call **`expandFsTableSql(sql, db)`** yourself (exported from `@seekcontext/agt0`).
+Paths support globs (`*`, `**`, `?`). Options (JSON string): `exclude`, `strict`, `delimiter`, `header`.
 
 ## Data Storage
 
 ```
 ~/.agt0/
-├── config.json          # Global config (default db, etc.)
+├── config.json
 └── databases/
-    ├── myapp.db         # One file = tables + files + memory
-    └── myapp-staging.db # Branches are copies
+    ├── myapp.db           # one file = tables + files + memory
+    └── myapp-staging.db   # branch
 ```
 
-Override the storage location with the `AGT0_HOME` environment variable.
+Override with `AGT0_HOME` env var. See [USER_MANUAL.md](./USER_MANUAL.md) for full reference.
 
 ## Publishing (maintainers)
 
-Publish from the **repository root**. `prepublishOnly` runs `npm run ci` (typecheck → build → test). Doc examples are smoke-tested in `test/docs-examples.e2e.test.ts`.
+`prepublishOnly` runs typecheck → build → test. Doc examples are smoke-tested in `test/docs-examples.e2e.test.ts`.
 
 ## License
 
